@@ -409,6 +409,34 @@ Blockly.Blocks['operator_mod'] = {
   }
 };
 
+Blockly.Blocks["operator_pi"] = {
+  /**
+   * Block for pi constant.
+   * @this Blockly.Block
+   */
+  init: function() {
+    this.jsonInit({
+      "message0": Blockly.Msg.OPERATORS_PI,
+      "category": Blockly.Categories.operators,
+      "extensions": ["colours_operators", "output_number"]
+    });
+  }
+};
+
+Blockly.Blocks["operator_newline"] = {
+  /**
+   * Block for newline character.
+   * @this Blockly.Block
+   */
+  init: function() {
+    this.jsonInit({
+      "message0": Blockly.Msg.OPERATORS_NEWLINE,
+      "category": Blockly.Categories.operators,
+      "extensions": ["colours_operators", "output_string"]
+    });
+  }
+};
+
 Blockly.Blocks['operator_round'] = {
   /**
    * Block for rounding a numbers.
