@@ -167,6 +167,62 @@ Blockly.Blocks['motion_pointtowards'] = {
   }
 };
 
+Blockly.Blocks["motion_pointtowards_xy"] = {
+  /**
+   * Block to point towards a specific x and y coordinate.
+   * @this Blockly.Block
+    */
+  init: function() {
+    this.jsonInit({
+      "message0": Blockly.Msg.MOTION_POINTTOWARDS_XY,
+      "args0": [
+        {
+          "type": "input_value",
+          "name": "X"
+        },
+        {
+          "type": "input_value",
+          "name": "Y"
+        }
+      ],
+      "category": Blockly.Categories.motion,
+      "extensions": ["colours_motion", "shape_statement"]
+    });
+  }
+};
+
+Blockly.Blocks["motion_pointtowards_xyfrom"] = {
+  /**
+   * Block to point towards a specific x and y coordinate from an x y position.
+   * @this Blockly.Block
+    */
+  init: function() {
+    this.jsonInit({
+      "message0": Blockly.Msg.MOTION_POINTTOWARDS_XYFROM,
+      "args0": [
+        {
+          "type": "input_value",
+          "name": "X"
+        },
+        {
+          "type": "input_value",
+          "name": "Y"
+        },
+        {
+          "type": "input_value",
+          "name": "FROMX"
+        },
+        {
+          "type": "input_value",
+          "name": "FROMY"
+        }
+      ],
+      "category": Blockly.Categories.motion,
+      "extensions": ["colours_motion", "shape_statement"]
+    });
+  }
+};
+
 Blockly.Blocks['motion_goto_menu'] = {
   /**
    * Go to drop-down menu.

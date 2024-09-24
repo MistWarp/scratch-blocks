@@ -556,6 +556,21 @@ Blockly.Blocks['looks_costumenumbername'] = {
   }
 };
 
+Blockly.Blocks['looks_costumes'] = {
+  /**
+   * Block to report costume list
+   * @this Blockly.Block
+   */
+  init: function() {
+    this.jsonInit({
+      "message0": Blockly.Msg.LOOKS_COSTUMES,
+      "category": Blockly.Categories.looks,
+      "checkboxInFlyout": true,
+      "extensions": ["colours_looks", "output_string"]
+    });
+  }
+};
+
 Blockly.Blocks['looks_switchbackdroptoandwait'] = {
   /**
    * Block to switch the backdrop to the selected one and wait.
