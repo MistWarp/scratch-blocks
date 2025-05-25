@@ -69,33 +69,29 @@ Blockly.IntersectionObserver.prototype.checkForIntersections = function() {
   for (var i = 0; i < this.observing.length; i++) {
     var block = this.observing[i];
     var blockPos = block.getRelativeToSurfaceXY();
-    var blockSize = null;
+    var blockSize = block.getHeightWidth();
+    
+    // Cache scaled values
+    var scaledBlockWidth = blockSize.width * workspaceScale;
+    var scaledBlockHeight = blockSize.height * workspaceScale;
+    var scaledPosX = blockPos.x * workspaceScale;
+    var scaledPosY = blockPos.y * workspaceScale;
+    
     if (RTL) {
-      blockSize = block.getHeightWidth();
-      blockPos.x -= blockSize.width;
-      blockSize.width *= workspaceScale;
-      blockSize.height *= workspaceScale;
+      scaledPosX -= scaledBlockWidth;
     }
-    blockPos.x *= workspaceScale;
-    blockPos.y *= workspaceScale;
-
-    var visible = true;
-    if (canvasPos.y + blockPos.y - margin > workspaceHeight) {
-      visible = false;
-    } else if (canvasPos.x + blockPos.x - margin > workspaceWidth) {
-      visible = false;
-    } else {
-      if (!blockSize) {
-        blockSize = block.getHeightWidth();
-        blockSize.width *= workspaceScale;
-        blockSize.height *= workspaceScale;
-      }
-      if (canvasPos.x + blockPos.x + blockSize.width + margin < 0) {
-        visible = false;
-      } else if (canvasPos.y + blockPos.y + blockSize.height + margin < 0) {
-        visible = false;
-      }
-    }
+    
+    // Cache canvas + position values
+    var canvasPlusX = canvasPos.x + scaledPosX;
+    var canvasPlusY = canvasPos.y + scaledPosY;
+    
+    // Single visibility check with early exit
+    var visible = !(
+      canvasPlusY - margin > workspaceHeight ||
+      canvasPlusX - margin > workspaceWidth ||
+      canvasPlusX + scaledBlockWidth + margin < 0 ||
+      canvasPlusY + scaledBlockHeight + margin < 0
+    );
 
     block.setIntersects(visible);
   }
