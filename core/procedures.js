@@ -262,11 +262,6 @@ Blockly.Procedures.flyoutCategory = function(workspace) {
     returnBlockValue.appendChild(returnBlockShadow);
     returnBlock.appendChild(returnBlockValue);
     xmlList.unshift(returnBlock);
-
-    var returnDocsButton = goog.dom.createDom('button');
-    returnDocsButton.setAttribute('callbackkey', 'OPEN_RETURN_DOCS');
-    returnDocsButton.setAttribute('text', Blockly.Msg.PROCEDURES_DOCS);
-    xmlList.unshift(returnDocsButton);
   }
 
   return xmlList;
