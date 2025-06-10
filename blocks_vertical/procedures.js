@@ -60,6 +60,12 @@ Blockly.ScratchBlocks.ProcedureUtils.callerMutationToDom = function() {
   if (this.return_ !== Blockly.PROCEDURES_CALL_TYPE_STATEMENT) {
     container.setAttribute('return', this.return_);
   }
+  
+  // Add custom color to mutation
+  if (this.customColor_) {
+    container.setAttribute('customcolor', this.customColor_);
+  }
+  
   return container;
 };
 
@@ -76,6 +82,13 @@ Blockly.ScratchBlocks.ProcedureUtils.callerDomToMutation = function(xmlElement) 
   this.argumentIds_ = JSON.parse(xmlElement.getAttribute('argumentids'));
   this.warp_ = JSON.parse(xmlElement.getAttribute('warp'));
   this.return_ = Blockly.ScratchBlocks.ProcedureUtils.parseReturnMutation(xmlElement);
+  
+  // Load custom color from mutation
+  if (xmlElement.hasAttribute('customcolor')) {
+    this.customColor_ = xmlElement.getAttribute('customcolor');
+    this.setCustomColor(this.customColor_);
+  }
+  
   if (this.return_ !== Blockly.PROCEDURES_CALL_TYPE_STATEMENT) {
     this.workspace.enableProcedureReturns();
   }
@@ -103,6 +116,17 @@ Blockly.ScratchBlocks.ProcedureUtils.definitionMutationToDom = function(
   container.setAttribute('argumentdefaults',
       JSON.stringify(this.argumentDefaults_));
   container.setAttribute('warp', JSON.stringify(this.warp_));
+  
+  // Add custom color to mutation
+  if (this.customColor_) {
+    container.setAttribute('customcolor', this.customColor_);
+  }
+  
+  // Add custom folder to mutation
+  if (this.customFolder_) {
+    container.setAttribute('customFolder', this.customFolder_);
+  }
+  
   return container;
 };
 
@@ -115,6 +139,17 @@ Blockly.ScratchBlocks.ProcedureUtils.definitionMutationToDom = function(
 Blockly.ScratchBlocks.ProcedureUtils.definitionDomToMutation = function(xmlElement) {
   this.procCode_ = xmlElement.getAttribute('proccode');
   this.warp_ = JSON.parse(xmlElement.getAttribute('warp'));
+
+  // Load custom color from mutation
+  if (xmlElement.hasAttribute('customcolor')) {
+    this.customColor_ = xmlElement.getAttribute('customcolor');
+    this.setCustomColor(this.customColor_);
+  }
+
+  // Load custom folder from mutation
+  if (xmlElement.hasAttribute('customFolder')) {
+    this.customFolder_ = xmlElement.getAttribute('customFolder');
+  }
 
   var prevArgIds = this.argumentIds_;
   var prevDisplayNames = this.displayNames_;
@@ -697,12 +732,52 @@ Blockly.ScratchBlocks.ProcedureUtils.addStringNumberExternal = function() {
 };
 
 /**
- * Externally-visible function to get the warp on procedure declaration.
- * @return {boolean} The value of the warp_ property.
+ * Set a custom color for this procedure block and update all related blocks
+ * @param {string} color The color in hex format (e.g., '#FF6680')
  * @public
  */
-Blockly.ScratchBlocks.ProcedureUtils.getWarp = function() {
-  return this.warp_;
+Blockly.ScratchBlocks.ProcedureUtils.setCustomColor = function(color) {
+  this.customColor_ = color;
+  if (color && color !== '#FF6680') {
+    // Override the default "more" colors with custom color
+    this.setColour(color, color, color, color);
+  } else {
+    // Revert to default "more" colors
+    var moreColors = Blockly.Colours.more;
+    this.setColour(moreColors.primary, moreColors.secondary, moreColors.tertiary, moreColors.quaternary);
+  }
+  
+  // Update all procedure call blocks with the same procCode
+  if (this.workspace && this.procCode_) {
+    var allBlocks = this.workspace.getAllBlocks();
+    var currentProcCode = this.procCode_;
+    
+    for (var i = 0; i < allBlocks.length; i++) {
+      var block = allBlocks[i];
+      if ((block.type === 'procedures_call' || 
+           block.type === 'procedures_prototype' || 
+           block.type === 'procedures_definition') &&
+          block.procCode_ === currentProcCode &&
+          block !== this) {
+        block.customColor_ = color;
+        if (color && color !== '#FF6680') {
+          block.setColour(color, color, color, color);
+        } else {
+          var moreColors = Blockly.Colours.more;
+          block.setColour(moreColors.primary, moreColors.secondary, moreColors.tertiary, moreColors.quaternary);
+        }
+      }
+    }
+  }
+};
+
+/**
+ * Get the custom color for this procedure block
+ * @return {string} The custom color or null if using default
+ * @public
+ */
+Blockly.ScratchBlocks.ProcedureUtils.getCustomColor = function() {
+  return this.customColor_ || null;
 };
 
 /**
@@ -865,6 +940,8 @@ Blockly.Blocks['procedures_call'] = {
   createAllInputs_: Blockly.ScratchBlocks.ProcedureUtils.createAllInputs_,
   updateDisplay_: Blockly.ScratchBlocks.ProcedureUtils.updateDisplay_,
   getReturn: Blockly.ScratchBlocks.ProcedureUtils.getReturn,
+  setCustomColor: Blockly.ScratchBlocks.ProcedureUtils.setCustomColor,
+  getCustomColor: Blockly.ScratchBlocks.ProcedureUtils.getCustomColor,
 
   // Exist on all three blocks, but have different implementations.
   mutationToDom: Blockly.ScratchBlocks.ProcedureUtils.callerMutationToDom,
@@ -908,6 +985,8 @@ Blockly.Blocks['procedures_prototype'] = {
   domToMutation: Blockly.ScratchBlocks.ProcedureUtils.definitionDomToMutation,
   populateArgument_: Blockly.ScratchBlocks.ProcedureUtils.populateArgumentOnPrototype_,
   addProcedureLabel_: Blockly.ScratchBlocks.ProcedureUtils.addLabelField_,
+  setCustomColor: Blockly.ScratchBlocks.ProcedureUtils.setCustomColor,
+  getCustomColor: Blockly.ScratchBlocks.ProcedureUtils.getCustomColor,
 
   // Only exists on procedures_prototype.
   createArgumentReporter_: Blockly.ScratchBlocks.ProcedureUtils.createArgumentReporter_,
@@ -952,6 +1031,8 @@ Blockly.Blocks['procedures_declaration'] = {
   focusLastEditor_: Blockly.ScratchBlocks.ProcedureUtils.focusLastEditor_,
   getWarp: Blockly.ScratchBlocks.ProcedureUtils.getWarp,
   setWarp: Blockly.ScratchBlocks.ProcedureUtils.setWarp,
+  setCustomColor: Blockly.ScratchBlocks.ProcedureUtils.setCustomColor,
+  getCustomColor: Blockly.ScratchBlocks.ProcedureUtils.getCustomColor,
   addLabelExternal: Blockly.ScratchBlocks.ProcedureUtils.addLabelExternal,
   addBooleanExternal: Blockly.ScratchBlocks.ProcedureUtils.addBooleanExternal,
   addStringNumberExternal: Blockly.ScratchBlocks.ProcedureUtils.addStringNumberExternal,

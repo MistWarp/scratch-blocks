@@ -46,6 +46,52 @@ goog.require('Blockly.Workspace');
 Blockly.Procedures.NAME_TYPE = Blockly.PROCEDURE_CATEGORY_NAME;
 
 /**
+ * Set of open procedure folders.
+ * @type {!Set.<string>}
+ * @private
+ */
+Blockly.Procedures.openFolders_ = new Set();
+
+/**
+ * Check if a folder is currently open.
+ * @param {string} folderName Name of the folder.
+ * @return {boolean} True if the folder is open.
+ */
+Blockly.Procedures.isFolderOpen = function(folderName) {
+  return Blockly.Procedures.openFolders_.has(folderName);
+};
+
+/**
+ * Set the open/closed state of a folder.
+ * @param {string} folderName Name of the folder.
+ * @param {boolean} isOpen True to open the folder, false to close it.
+ */
+Blockly.Procedures.setFolderOpen = function(folderName, isOpen) {
+  if (isOpen) {
+    Blockly.Procedures.openFolders_.add(folderName);
+  } else {
+    Blockly.Procedures.openFolders_.delete(folderName);
+  }
+  // Refresh the flyout to show the updated state
+  var workspace = Blockly.getMainWorkspace();
+  if (workspace && workspace.getToolbox) {
+    var toolbox = workspace.getToolbox();
+    if (toolbox && toolbox.refreshSelection) {
+      toolbox.refreshSelection();
+    }
+  }
+};
+
+/**
+ * Toggle the open/closed state of a folder.
+ * @param {string} folderName Name of the folder.
+ */
+Blockly.Procedures.toggleFolder = function(folderName) {
+  var isOpen = Blockly.Procedures.isFolderOpen(folderName);
+  Blockly.Procedures.setFolderOpen(folderName, !isOpen);
+};
+
+/**
  * Find all user-created procedure definitions in a workspace.
  * @param {!Blockly.Workspace} root Root workspace.
  * @return {!Array.<!Array.<!Array>>} Pair of arrays, the
@@ -226,21 +272,80 @@ Blockly.Procedures.flyoutCategory = function(workspace) {
   // Create call blocks for each procedure defined in the workspace
   var mutations = Blockly.Procedures.allProcedureMutations(workspace);
   mutations = Blockly.Procedures.sortProcedureMutations_(mutations);
+  
+  // Group procedures by folder
+  var folderGroups = {};
+  var unfoldered = [];
+  
   for (var i = 0; i < mutations.length; i++) {
     var mutation = mutations[i].cloneNode(false);
+    var folderName = mutation.getAttribute('customFolder');
+    
+    if (folderName && folderName.trim()) {
+      if (!folderGroups[folderName]) {
+        folderGroups[folderName] = [];
+      }
+      folderGroups[folderName].push(mutation);
+    } else {
+      unfoldered.push(mutation);
+    }
+  }
+  
+  // Add unfoldered procedures first
+  for (var i = 0; i < unfoldered.length; i++) {
+    var mutation = unfoldered[i];
     var procCode = mutation.getAttribute('proccode');
     var returnType = Blockly.Procedures.getProcedureReturnType(procCode, workspace);
     if (returnType !== Blockly.PROCEDURES_CALL_TYPE_STATEMENT) {
       mutation.setAttribute('return', returnType);
     }
-    // <block type="procedures_call">
-    //   <mutation ...></mutation>
-    // </block>
     var block = goog.dom.createDom('block');
     block.setAttribute('type', 'procedures_call');
     block.setAttribute('gap', 12);
     block.appendChild(mutation);
     xmlList.push(block);
+  }
+  
+  // Add folders and their procedures
+  var folderNames = Object.keys(folderGroups).sort();
+  for (var f = 0; f < folderNames.length; f++) {
+    var folderName = folderNames[f];
+    var procedures = folderGroups[folderName];
+    var isOpen = Blockly.Procedures.isFolderOpen(folderName);
+    
+    // Add clickable folder button
+    var folderButton = goog.dom.createDom('button');
+    var folderIcon = isOpen ? '▼' : '▶';
+    folderButton.setAttribute('text', folderIcon + ' ' + folderName);
+    folderButton.setAttribute('callbackKey', 'TOGGLE_FOLDER_' + folderName);
+    var callbackKey = 'TOGGLE_FOLDER_' + folderName;
+    workspace.registerButtonCallback(callbackKey, function(folderName) {
+      return function() {
+        Blockly.Procedures.toggleFolder(folderName);
+      };
+    }(folderName));
+    
+    if (f === 0 && unfoldered.length > 0) {
+      folderButton.setAttribute('gap', 24);
+    }
+    xmlList.push(folderButton);
+    
+    // Add procedure blocks in this folder (only if folder is open)
+    if (isOpen) {
+      for (var p = 0; p < procedures.length; p++) {
+        var mutation = procedures[p];
+        var procCode = mutation.getAttribute('proccode');
+        var returnType = Blockly.Procedures.getProcedureReturnType(procCode, workspace);
+        if (returnType !== Blockly.PROCEDURES_CALL_TYPE_STATEMENT) {
+          mutation.setAttribute('return', returnType);
+        }
+        var block = goog.dom.createDom('block');
+        block.setAttribute('type', 'procedures_call');
+        block.setAttribute('gap', 12);
+        block.appendChild(mutation);
+        xmlList.push(block);
+      }
+    }
   }
 
   var showReturn = (
