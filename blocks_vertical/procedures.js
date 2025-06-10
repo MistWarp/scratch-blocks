@@ -790,6 +790,15 @@ Blockly.ScratchBlocks.ProcedureUtils.setWarp = function(warp) {
 };
 
 /**
+ * Externally-visible function to get the warp value of procedure declaration.
+ * @return {boolean} The value of the warp_ property.
+ * @public
+ */
+Blockly.ScratchBlocks.ProcedureUtils.getWarp = function() {
+  return this.warp_;
+};
+
+/**
  * @this {BlockSvg}
  * @returns {number} Value of the return_ property. See enum in constants.js
  */
