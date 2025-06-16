@@ -585,7 +585,17 @@ Blockly.VerticalFlyout.prototype.createRect_ = function(block, x, y,
   rect.tooltip = block;
   Blockly.Tooltip.bindMouseEvents(rect);
   // Add the rectangles under the blocks, so that the blocks' tooltips work.
-  this.workspace_.getCanvas().insertBefore(rect, block.getSvgRoot());
+  var blockSvgRoot = block.getSvgRoot();
+  var canvas = this.workspace_.getCanvas();
+  // Safety check: ensure the block's SVG root is actually a child of the canvas
+  // before using it as a reference node for insertBefore
+  if (blockSvgRoot && blockSvgRoot.parentNode === canvas) {
+    canvas.insertBefore(rect, blockSvgRoot);
+  } else {
+    // If the block's SVG root is not a child of the canvas, just append the rect
+    // This can happen due to race conditions during flyout layout
+    canvas.appendChild(rect);
+  }
 
   block.flyoutRect_ = rect;
   this.backgroundButtons_[index] = rect;
@@ -641,7 +651,16 @@ Blockly.VerticalFlyout.prototype.createCheckbox_ = function(block, cursorX,
   }
 
   block.flyoutCheckbox = checkboxObj;
-  this.workspace_.getCanvas().insertBefore(checkboxGroup, svgRoot);
+  var canvas = this.workspace_.getCanvas();
+  // Safety check: ensure the block's SVG root is actually a child of the canvas
+  // before using it as a reference node for insertBefore
+  if (svgRoot && svgRoot.parentNode === canvas) {
+    canvas.insertBefore(checkboxGroup, svgRoot);
+  } else {
+    // If the block's SVG root is not a child of the canvas, just append the checkbox
+    // This can happen due to race conditions during flyout layout
+    canvas.appendChild(checkboxGroup);
+  }
   this.checkboxes_[block.id] = checkboxObj;
 };
 
