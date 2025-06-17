@@ -54,8 +54,8 @@ Blockly.Events.BlockBase = function(block) {
    * The block id for the block this event pertains to
    * @type {string}
    */
-  this.blockId = block.id;
-  this.workspaceId = block.workspace.id;
+  this.blockId = block && block.id ? block.id : '';
+  this.workspaceId = block && block.workspace ? block.workspace.id : '';
 };
 goog.inherits(Blockly.Events.BlockBase, Blockly.Events.Abstract);
 
@@ -453,7 +453,13 @@ Blockly.Events.Move.prototype.recordNew = function() {
  */
 Blockly.Events.Move.prototype.currentLocation_ = function() {
   var workspace = Blockly.Workspace.getById(this.workspaceId);
+  if (!workspace || !this.blockId) {
+    return {};
+  }
   var block = workspace.getBlockById(this.blockId);
+  if (!block) {
+    return {};
+  }
   var location = {};
   var parent = block.getParent();
   if (parent) {

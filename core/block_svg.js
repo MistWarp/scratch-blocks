@@ -402,13 +402,14 @@ Blockly.BlockSvg.prototype.getRelativeToSurfaceXY = function() {
 Blockly.BlockSvg.prototype.moveBy = function(dx, dy) {
   goog.asserts.assert(!this.parentBlock_, 'Block has parent.');
   var eventsEnabled = Blockly.Events.isEnabled();
-  if (eventsEnabled) {
-    var event = new Blockly.Events.BlockMove(this);
+  var event = null;
+  if (eventsEnabled && this.id) {
+    event = new Blockly.Events.BlockMove(this);
   }
   var xy = this.getRelativeToSurfaceXY();
   this.translate(xy.x + dx, xy.y + dy);
   this.moveConnections_(dx, dy);
-  if (eventsEnabled) {
+  if (eventsEnabled && event) {
     event.recordNew();
     Blockly.Events.fire(event);
   }

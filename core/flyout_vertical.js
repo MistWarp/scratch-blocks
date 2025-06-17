@@ -613,7 +613,7 @@ Blockly.VerticalFlyout.prototype.createRect_ = function(block, x, y,
  */
 Blockly.VerticalFlyout.prototype.createCheckbox_ = function(block, cursorX,
     cursorY, blockHW) {
-  var checkboxState = Blockly.VerticalFlyout.getCheckboxState(block.id);
+  var checkboxState = Blockly.VerticalFlyout.getCheckboxState(block.id || '');
   var svgRoot = block.getSvgRoot();
   var extraSpace = this.CHECKBOX_SIZE + this.CHECKBOX_MARGIN;
   var width = this.RTL ? this.getWidth() / this.workspace_.scale - extraSpace : cursorX;
@@ -661,7 +661,10 @@ Blockly.VerticalFlyout.prototype.createCheckbox_ = function(block, cursorX,
     // This can happen due to race conditions during flyout layout
     canvas.appendChild(checkboxGroup);
   }
-  this.checkboxes_[block.id] = checkboxObj;
+  // Only add to checkboxes map if block has a valid ID
+  if (block.id) {
+    this.checkboxes_[block.id] = checkboxObj;
+  }
 };
 
 /**
@@ -674,7 +677,9 @@ Blockly.VerticalFlyout.prototype.createCheckbox_ = function(block, cursorX,
  */
 Blockly.VerticalFlyout.prototype.checkboxClicked_ = function(checkboxObj) {
   return function(e) {
-    this.setCheckboxState(checkboxObj.block.id, !checkboxObj.clicked);
+    if (checkboxObj.block && checkboxObj.block.id) {
+      this.setCheckboxState(checkboxObj.block.id, !checkboxObj.clicked);
+    }
     // This event has been handled.  No need to bubble up to the document.
     e.stopPropagation();
     e.preventDefault();
