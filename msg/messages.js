@@ -55,6 +55,12 @@ Blockly.Msg.CONTROL_COUNTER = 'counter';
 Blockly.Msg.CONTROL_INCRCOUNTER = 'increment counter';
 Blockly.Msg.CONTROL_CLEARCOUNTER = 'clear counter';
 Blockly.Msg.CONTROL_ALLATONCE = 'all at once';
+Blockly.Msg.CONTROL_SWITCH = 'switch %1';
+Blockly.Msg.CONTROL_CASE = 'case %1';
+Blockly.Msg.CONTROL_CASE_FALLTHROUGH = 'case %1';
+Blockly.Msg.CONTROL_DEFAULT = 'default';
+Blockly.Msg.CONTROL_BREAK = 'break';
+Blockly.Msg.CONTROL_CONTINUE = 'continue';
 
 // Data blocks
 Blockly.Msg.DATA_SETVARIABLETO = 'set %1 to %2';
