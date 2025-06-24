@@ -740,7 +740,14 @@ Blockly.ScratchBlocks.ProcedureUtils.setCustomColor = function(color) {
   this.customColor_ = color;
   if (color && color !== '#FF6680') {
     // Override the default "more" colors with custom color
-    this.setColour(color, color, color, color);
+    const c = goog.color;
+    const rgb = c.hexToRgb(color);
+
+    this.setColour(color,
+      c.rgbArrayToHex(c.darken(rgb, 0.1)),
+      c.rgbArrayToHex(c.darken(rgb, 0.2)),
+      c.rgbArrayToHex(c.darken(rgb, 0.3))
+    );
   } else {
     // Revert to default "more" colors
     var moreColors = Blockly.Colours.more;
@@ -761,7 +768,15 @@ Blockly.ScratchBlocks.ProcedureUtils.setCustomColor = function(color) {
           block !== this) {
         block.customColor_ = color;
         if (color && color !== '#FF6680') {
-          block.setColour(color, color, color, color);
+
+          const c = goog.color;
+          const rgb = c.hexToRgb(color);
+
+          block.setColour(color,
+            c.rgbArrayToHex(c.darken(rgb, 0.1)),
+            c.rgbArrayToHex(c.darken(rgb, 0.2)),
+            c.rgbArrayToHex(c.darken(rgb, 0.3))
+          );
         } else {
           var moreColors = Blockly.Colours.more;
           block.setColour(moreColors.primary, moreColors.secondary, moreColors.tertiary, moreColors.quaternary);
