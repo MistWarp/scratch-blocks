@@ -348,11 +348,7 @@ Blockly.Procedures.flyoutCategory = function(workspace) {
     }
   }
 
-  var showReturn = (
-    Blockly.Procedures.DEFAULT_ENABLE_RETURNS ?
-    mutations.length > 0 :
-    workspace.procedureReturnsEnabled
-  );
+  var showReturn = true;
   if (showReturn) {
     var returnBlock = goog.dom.createDom('block');
     returnBlock.setAttribute('type', Blockly.PROCEDURES_RETURN_BLOCK_TYPE);
