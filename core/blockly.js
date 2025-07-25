@@ -233,26 +233,16 @@ Blockly.onKeyDown_ = function(e) {
     if (e.keyCode == 86) {
       // 'v' for paste.
       if (Blockly.clipboardXml_) {
-        // Check if mouse is over the workspace before allowing paste
         var workspace = Blockly.clipboardSource_;
         if (workspace.isFlyout) {
           workspace = workspace.targetWorkspace;
         }
         
-        // Create a synthetic mouse event using the last known mouse position
-        var syntheticEvent = {
-          clientX: Blockly.Tooltip.lastX_,
-          clientY: Blockly.Tooltip.lastY_
-        };
-        
-        // Only allow paste if mouse is over the workspace
-        if (workspace.isInsideBlocksArea(syntheticEvent)) {
-          Blockly.Events.setGroup(true);
-          // Pasting always pastes to the main workspace, even if the copy started
-          // in a flyout workspace.
-          workspace.paste(Blockly.clipboardXml_);
-          Blockly.Events.setGroup(false);
-        }
+        Blockly.Events.setGroup(true);
+        // Pasting always pastes to the main workspace, even if the copy started
+        // in a flyout workspace.
+        workspace.paste(Blockly.clipboardXml_);
+        Blockly.Events.setGroup(false);
       }
     } else if (e.keyCode == 90 || e.keyCode === 89) {
       // 'z' for undo 'Z' is for redo. 'y' is always redo.
