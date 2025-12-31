@@ -585,7 +585,17 @@ Blockly.VerticalFlyout.prototype.createRect_ = function(block, x, y,
   rect.tooltip = block;
   Blockly.Tooltip.bindMouseEvents(rect);
   // Add the rectangles under the blocks, so that the blocks' tooltips work.
-  this.workspace_.getCanvas().insertBefore(rect, block.getSvgRoot());
+  var blockSvgRoot = block.getSvgRoot();
+  var canvas = this.workspace_.getCanvas();
+  // Safety check: ensure the block's SVG root is actually a child of the canvas
+  // before using it as a reference node for insertBefore
+  if (blockSvgRoot && blockSvgRoot.parentNode === canvas) {
+    canvas.insertBefore(rect, blockSvgRoot);
+  } else {
+    // If the block's SVG root is not a child of the canvas, just append the rect
+    // This can happen due to race conditions during flyout layout
+    canvas.appendChild(rect);
+  }
 
   block.flyoutRect_ = rect;
   this.backgroundButtons_[index] = rect;
@@ -603,7 +613,7 @@ Blockly.VerticalFlyout.prototype.createRect_ = function(block, x, y,
  */
 Blockly.VerticalFlyout.prototype.createCheckbox_ = function(block, cursorX,
     cursorY, blockHW) {
-  var checkboxState = Blockly.VerticalFlyout.getCheckboxState(block.id);
+  var checkboxState = Blockly.VerticalFlyout.getCheckboxState(block.id || '');
   var svgRoot = block.getSvgRoot();
   var extraSpace = this.CHECKBOX_SIZE + this.CHECKBOX_MARGIN;
   var width = this.RTL ? this.getWidth() / this.workspace_.scale - extraSpace : cursorX;
@@ -641,8 +651,20 @@ Blockly.VerticalFlyout.prototype.createCheckbox_ = function(block, cursorX,
   }
 
   block.flyoutCheckbox = checkboxObj;
-  this.workspace_.getCanvas().insertBefore(checkboxGroup, svgRoot);
-  this.checkboxes_[block.id] = checkboxObj;
+  var canvas = this.workspace_.getCanvas();
+  // Safety check: ensure the block's SVG root is actually a child of the canvas
+  // before using it as a reference node for insertBefore
+  if (svgRoot && svgRoot.parentNode === canvas) {
+    canvas.insertBefore(checkboxGroup, svgRoot);
+  } else {
+    // If the block's SVG root is not a child of the canvas, just append the checkbox
+    // This can happen due to race conditions during flyout layout
+    canvas.appendChild(checkboxGroup);
+  }
+  // Only add to checkboxes map if block has a valid ID
+  if (block.id) {
+    this.checkboxes_[block.id] = checkboxObj;
+  }
 };
 
 /**
@@ -655,7 +677,9 @@ Blockly.VerticalFlyout.prototype.createCheckbox_ = function(block, cursorX,
  */
 Blockly.VerticalFlyout.prototype.checkboxClicked_ = function(checkboxObj) {
   return function(e) {
-    this.setCheckboxState(checkboxObj.block.id, !checkboxObj.clicked);
+    if (checkboxObj.block && checkboxObj.block.id) {
+      this.setCheckboxState(checkboxObj.block.id, !checkboxObj.clicked);
+    }
     // This event has been handled.  No need to bubble up to the document.
     e.stopPropagation();
     e.preventDefault();

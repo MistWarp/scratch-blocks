@@ -210,3 +210,186 @@ Blockly.Blocks['control_wait'] = {
     });
   }
 };
+
+Blockly.Blocks['control_switch'] = {
+  /**
+   * Block for switch statement.
+   * @this Blockly.Block
+   */
+  init: function() {
+    this.jsonInit({
+      "id": "control_switch",
+      "message0": "%1 %2",
+      "args0": [
+        {
+          "type": "field_image",
+          "src": Blockly.mainWorkspace.options.pathToMedia + "icons/control_switch.svg",
+          "width": 40,
+          "height": 40,
+          "alt": "Switch"
+        },
+        {
+          "type": "input_value",
+          "name": "VALUE"
+        }
+      ],
+      "message1": "%1",
+      "args1": [
+        {
+          "type": "input_statement",
+          "name": "SUBSTACK"
+        }
+      ],
+      "inputsInline": true,
+      "previousStatement": null,
+      "nextStatement": null,
+      "category": Blockly.Categories.control,
+      "colour": Blockly.Colours.control.primary,
+      "colourSecondary": Blockly.Colours.control.secondary,
+      "colourTertiary": Blockly.Colours.control.tertiary,
+      "colourQuaternary": Blockly.Colours.control.quaternary
+    });
+  }
+};
+
+Blockly.Blocks['control_case'] = {
+  /**
+   * Block for case statement.
+   * @this Blockly.Block
+   */
+  init: function() {
+    this.jsonInit({
+      "id": "control_case",
+      "message0": "%1 %2",
+      "args0": [
+        {
+          "type": "field_image",
+          "src": Blockly.mainWorkspace.options.pathToMedia + "icons/control_case.svg",
+          "width": 40,
+          "height": 40,
+          "alt": "Case"
+        },
+        {
+          "type": "input_value",
+          "name": "VALUE"
+        }
+      ],
+      "message1": "%1",
+      "args1": [
+        {
+          "type": "input_statement",
+          "name": "SUBSTACK"
+        }
+      ],
+      "message2": "break",
+      "inputsInline": true,
+      "previousStatement": null,
+      "nextStatement": null,
+      "category": Blockly.Categories.control,
+      "colour": Blockly.Colours.control.primary,
+      "colourSecondary": Blockly.Colours.control.secondary,
+      "colourTertiary": Blockly.Colours.control.tertiary,
+      "colourQuaternary": Blockly.Colours.control.quaternary
+    });
+  }
+};
+
+Blockly.Blocks['control_default'] = {
+  /**
+   * Block for default case statement.
+   * @this Blockly.Block
+   */
+  init: function() {
+    this.jsonInit({
+      "id": "control_default",
+      "message0": "%1",
+      "args0": [
+        {
+          "type": "field_image",
+          "src": Blockly.mainWorkspace.options.pathToMedia + "icons/control_default.svg",
+          "width": 40,
+          "height": 40,
+          "alt": "Default"
+        }
+      ],
+      "message1": "%1",
+      "args1": [
+        {
+          "type": "input_statement",
+          "name": "SUBSTACK"
+        }
+      ],
+      "inputsInline": true,
+      "previousStatement": null,
+      "nextStatement": null,
+      "category": Blockly.Categories.control,
+      "colour": Blockly.Colours.control.primary,
+      "colourSecondary": Blockly.Colours.control.secondary,
+      "colourTertiary": Blockly.Colours.control.tertiary,
+      "colourQuaternary": Blockly.Colours.control.quaternary
+    });
+  }
+};
+
+Blockly.Blocks['control_break'] = {
+  /**
+   * Block for break statement.
+   * @this Blockly.Block
+   */
+  init: function() {
+    this.jsonInit({
+      "id": "control_break",
+      "message0": "%1",
+      "args0": [
+        {
+          "type": "field_image",
+          "src": Blockly.mainWorkspace.options.pathToMedia + "icons/control_break.svg",
+          "width": 40,
+          "height": 40,
+          "alt": "Break"
+        }
+      ],
+      "inputsInline": true,
+      "previousStatement": null,
+      "category": Blockly.Categories.control,
+      "colour": Blockly.Colours.control.primary,
+      "colourSecondary": Blockly.Colours.control.secondary,
+      "colourTertiary": Blockly.Colours.control.tertiary,
+      "colourQuaternary": Blockly.Colours.control.quaternary
+    });
+  }
+};
+
+Blockly.Blocks['control_case_fallthrough'] = {
+  /**
+   * Block for case statement with fallthrough (no C-shape).
+   * @this Blockly.Block
+   */
+  init: function() {
+    this.jsonInit({
+      "id": "control_case_fallthrough",
+      "message0": "%1 %2",
+      "args0": [
+        {
+          "type": "field_image",
+          "src": Blockly.mainWorkspace.options.pathToMedia + "icons/control_case_fallthrough.svg",
+          "width": 40,
+          "height": 40,
+          "alt": "Case Fallthrough"
+        },
+        {
+          "type": "input_value",
+          "name": "VALUE"
+        }
+      ],
+      "inputsInline": true,
+      "previousStatement": null,
+      "nextStatement": null,
+      "category": Blockly.Categories.control,
+      "colour": Blockly.Colours.control.primary,
+      "colourSecondary": Blockly.Colours.control.secondary,
+      "colourTertiary": Blockly.Colours.control.tertiary,
+      "colourQuaternary": Blockly.Colours.control.quaternary
+    });
+  }
+};
