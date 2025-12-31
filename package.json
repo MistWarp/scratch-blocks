@@ -7,8 +7,7 @@
   "homepage": "https://github.com/LLK/scratch-blocks#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/LLK/scratch-blocks.git",
-    "sha": "98ff17e5a754647ffea570e1af16cd8d8c9005b0"
+    "url": "https://github.com/LLK/scratch-blocks.git"
   },
   "main": "./dist/vertical.js",
   "browser": "./shim/vertical.js",
@@ -27,8 +26,7 @@
   },
   "dependencies": {
     "exports-loader": "0.7.0",
-    "imports-loader": "0.8.0",
-    "scratch-blocks": "github:MistWarp/scratch-blocks#develop-builds"
+    "imports-loader": "0.8.0"
   },
   "devDependencies": {
     "async": "2.6.4",
@@ -36,7 +34,7 @@
     "copy-webpack-plugin": "4.6.0",
     "eslint": "4.19.1",
     "event-stream": "3.3.5",
-    "gh-pages": "^6.3.0",
+    "gh-pages": "0.12.0",
     "glob": "7.2.3",
     "google-closure-compiler": "20180402.0.0",
     "google-closure-library": "20190301.0.0",
