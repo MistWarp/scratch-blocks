@@ -106,6 +106,36 @@ Blockly.BlockDragger = function(block, workspace) {
    * @private
    */
   this.dragIconData_ = Blockly.BlockDragger.initIconData_(block);
+
+  /**
+   * A pending insertion marker update scheduled for the next animation frame.
+   * Used to throttle expensive connection searching during drag.
+   * @type {?{delta: !goog.math.Coordinate, deleteArea: ?number}}
+   * @private
+   */
+  this.pendingConnectionUpdate_ = null;
+
+  /**
+   * The requestAnimationFrame id for a queued connection update.
+   * @type {?number}
+   * @private
+   */
+  this.connectionUpdateRafId_ = null;
+
+  /**
+   * Minimum time between expensive connection search updates during a drag.
+   * This is dynamically adjusted for very large workspaces.
+   * @type {number}
+   * @private
+   */
+  this.connectionUpdateMinIntervalMs_ = 16;
+
+  /**
+   * Timestamp of the last time we actually ran a connection search update.
+   * @type {number}
+   * @private
+   */
+  this.lastConnectionUpdateTimeMs_ = 0;
 };
 
 /**
@@ -118,10 +148,65 @@ Blockly.BlockDragger.prototype.dispose = function() {
   this.startWorkspace_ = null;
   this.dragIconData_.length = 0;
 
+  if (this.connectionUpdateRafId_ !== null) {
+    cancelAnimationFrame(this.connectionUpdateRafId_);
+    this.connectionUpdateRafId_ = null;
+  }
+  this.pendingConnectionUpdate_ = null;
+
   if (this.draggedConnectionManager_) {
     this.draggedConnectionManager_.dispose();
     this.draggedConnectionManager_ = null;
   }
+};
+
+/**
+ * Queue an insertion marker / connection update for the next animation frame.
+ * Connection searching can be very expensive in large workspaces, so we avoid
+ * doing it for every mousemove.
+ * @param {!goog.math.Coordinate} delta Drag delta in workspace units.
+ * @param {?number} deleteArea One of {@link Blockly.DELETE_AREA_TRASH},
+ *     {@link Blockly.DELETE_AREA_TOOLBOX}, or {@link Blockly.DELETE_AREA_NONE}.
+ * @private
+ */
+Blockly.BlockDragger.prototype.queueConnectionUpdate_ = function(delta, deleteArea) {
+  this.pendingConnectionUpdate_ = {
+    delta: delta,
+    deleteArea: deleteArea
+  };
+
+  if (this.connectionUpdateRafId_ !== null) {
+    return;
+  }
+
+  var self = this;
+  var tick = function() {
+    self.connectionUpdateRafId_ = null;
+    if (!self.draggedConnectionManager_ || !self.pendingConnectionUpdate_) {
+      self.pendingConnectionUpdate_ = null;
+      return;
+    }
+
+    var pending = self.pendingConnectionUpdate_;
+    var isDeleteArea = pending.deleteArea === Blockly.DELETE_AREA_TRASH ||
+        pending.deleteArea === Blockly.DELETE_AREA_TOOLBOX;
+
+    // In very large scripts, connection searching can dominate frame time.
+    // Limit how often we do this work, but keep delete-area feedback immediate.
+    var now = Date.now();
+    if (!isDeleteArea &&
+        self.connectionUpdateMinIntervalMs_ > 0 &&
+        (now - self.lastConnectionUpdateTimeMs_) < self.connectionUpdateMinIntervalMs_) {
+      self.connectionUpdateRafId_ = requestAnimationFrame(tick);
+      return;
+    }
+
+    self.pendingConnectionUpdate_ = null;
+    self.lastConnectionUpdateTimeMs_ = now;
+    self.draggedConnectionManager_.update(pending.delta, pending.deleteArea);
+  };
+
+  this.connectionUpdateRafId_ = requestAnimationFrame(tick);
 };
 
 /**
@@ -165,6 +250,27 @@ Blockly.BlockDragger.prototype.startBlockDrag = function(currentDragDeltaXY) {
   this.workspace_.setResizesEnabled(false);
   Blockly.BlockAnimations.disconnectUiStop();
 
+  // Adaptively throttle connection searching for huge workspaces.
+  // Counting connections is cheap compared to searching them on every move.
+  this.connectionUpdateMinIntervalMs_ = 16;
+  this.lastConnectionUpdateTimeMs_ = 0;
+  if (this.workspace_.connectionDBList) {
+    var totalConnections = 0;
+    for (var i = 0; i < this.workspace_.connectionDBList.length; i++) {
+      var db = this.workspace_.connectionDBList[i];
+      if (db && db.connections_) {
+        totalConnections += db.connections_.length;
+      }
+    }
+    if (totalConnections > 10000) {
+      this.connectionUpdateMinIntervalMs_ = 50;
+    } else if (totalConnections > 5000) {
+      this.connectionUpdateMinIntervalMs_ = 33;
+    } else if (totalConnections > 2500) {
+      this.connectionUpdateMinIntervalMs_ = 25;
+    }
+  }
+
   if (this.draggingBlock_.getParent()) {
     this.draggingBlock_.unplug();
     var delta = this.pixelsToWorkspaceUnits_(currentDragDeltaXY);
@@ -193,10 +299,11 @@ Blockly.BlockDragger.prototype.startBlockDrag = function(currentDragDeltaXY) {
  * @param {!Event} e The most recent move event.
  * @param {!goog.math.Coordinate} currentDragDeltaXY How far the pointer has
  *     moved from the position at the start of the drag, in pixel units.
+ * @param {boolean=} opt_forceConnectionUpdate Whether to immediately update connections.
  * @package
  * @return {boolean} True if the event should be propagated, false if not.
  */
-Blockly.BlockDragger.prototype.dragBlock = function(e, currentDragDeltaXY) {
+Blockly.BlockDragger.prototype.dragBlock = function(e, currentDragDeltaXY, opt_forceConnectionUpdate) {
   var delta = this.pixelsToWorkspaceUnits_(currentDragDeltaXY);
   var newLoc = goog.math.Coordinate.sum(this.startXY_, delta);
 
@@ -205,7 +312,19 @@ Blockly.BlockDragger.prototype.dragBlock = function(e, currentDragDeltaXY) {
 
   this.deleteArea_ = this.workspace_.isDeleteArea(e);
   var isOutside = !this.workspace_.isInsideBlocksArea(e);
-  this.draggedConnectionManager_.update(delta, this.deleteArea_, isOutside);
+
+  if (opt_forceConnectionUpdate) {
+    if (this.connectionUpdateRafId_ !== null) {
+      cancelAnimationFrame(this.connectionUpdateRafId_);
+      this.connectionUpdateRafId_ = null;
+    }
+    this.pendingConnectionUpdate_ = null;
+    this.lastConnectionUpdateTimeMs_ = Date.now();
+    this.draggedConnectionManager_.update(delta, this.deleteArea_);
+  } else {
+    this.queueConnectionUpdate_(delta, this.deleteArea_);
+  }
+
   if (isOutside !== this.wasOutside_) {
     this.fireDragOutsideEvent_(isOutside);
     this.wasOutside_ = isOutside;
@@ -224,7 +343,7 @@ Blockly.BlockDragger.prototype.dragBlock = function(e, currentDragDeltaXY) {
  */
 Blockly.BlockDragger.prototype.endBlockDrag = function(e, currentDragDeltaXY) {
   // Make sure internal state is fresh.
-  this.dragBlock(e, currentDragDeltaXY);
+  this.dragBlock(e, currentDragDeltaXY, true);
   this.dragIconData_ = [];
   var isOutside = this.wasOutside_;
   this.fireEndDragEvent_(isOutside);
@@ -377,8 +496,11 @@ Blockly.BlockDragger.prototype.updateCursorDuringBlockDrag_ = function(isOutside
   }
 
   if (isOutside) {
-    // Let mouse events through to GUI
-    this.draggingBlock_.setMouseThroughStyle(true);
+    // Let mouse events through to the surrounding UI, but avoid forwarding
+    // events into the toolbox while dragging. The toolbox can be extremely
+    // expensive to hover/relayout when many extensions/blocks are present.
+    this.draggingBlock_.setMouseThroughStyle(
+        this.deleteArea_ !== Blockly.DELETE_AREA_TOOLBOX);
   } else {
     this.draggingBlock_.setMouseThroughStyle(false);
   }
