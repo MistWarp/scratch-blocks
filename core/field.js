@@ -501,42 +501,478 @@ Blockly.Field.prototype.updateWidth = function() {
 };
 
 /**
- * Gets the width of a text element, caching it in the process.
- * @param {!Element} textElement An SVG 'text' element.
- * @return {number} Width of element.
+ * Cache of text widths by font configuration.
+ * Keys are font identifiers (class names), values are LRU caches.
+ * @type {Object<string, Object>}
+ * @private
+ */
+Blockly.Field.fontWidthCache_ = {};
+
+/**
+ * Cache of average character widths by font configuration.
+ * Used for approximation when text hasn't been measured yet.
+ * @type {Object<string, number>}
+ * @private
+ */
+Blockly.Field.avgCharWidthCache_ = {};
+
+/**
+ * Cache of individual character widths by font configuration.
+ * Keys are font identifiers, values are objects mapping characters to widths.
+ * @type {Object<string, Object<string, number>>}
+ * @private
+ */
+Blockly.Field.charWidthCache_ = {};
+
+/**
+ * Common kerning pairs and their adjustment values by font.
+ * @type {Object<string, Object<string, number>>}
+ * @private
+ */
+Blockly.Field.kerningCache_ = {};
+
+/**
+ * Shared measurement element for all font classes.
+ * @type {?{svg: Element, text: Element}}
+ * @private
+ */
+Blockly.Field.measurementElement_ = null;
+
+/**
+ * Maximum number of entries per font cache (LRU).
+ * @const {number}
+ * @private
+ */
+Blockly.Field.MAX_CACHE_ENTRIES_ = 5000;
+
+/**
+ * Maximum text length to cache. Longer strings are measured directly.
+ * @const {number}
+ * @private
+ */
+Blockly.Field.MAX_CACHE_LENGTH_ = 100;
+
+/**
+ * Whether to use character-based width approximation for uncached strings.
+ * When true, uses sum of individual character widths instead of measuring.
+ * Slightly less accurate but much faster (no DOM calls).
+ * @type {boolean}
+ * @private
+ */
+Blockly.Field.USE_CHAR_APPROXIMATION_ = true;
+
+/**
+ * Accuracy threshold for character-based approximation (as percentage).
+ * If approximation is within this % of actual, use approximation going forward.
+ * @const {number}
+ * @private
+ */
+Blockly.Field.APPROXIMATION_THRESHOLD_ = 2;
+
+/**
+ * Simple LRU cache implementation.
+ * @param {number} maxSize Maximum number of entries.
+ * @constructor
+ * @private
+ */
+Blockly.Field.LRUCache_ = function(maxSize) {
+  this.maxSize = maxSize;
+  this.cache = Object.create(null);
+  this.keys = [];
+};
+
+/**
+ * Get a value from the cache.
+ * @param {string} key The cache key.
+ * @return {*} The cached value, or undefined if not found.
+ */
+Blockly.Field.LRUCache_.prototype.get = function(key) {
+  var value = this.cache[key];
+  if (value !== undefined) {
+    // Move to end (most recently used)
+    var index = this.keys.indexOf(key);
+    if (index !== -1 && index !== this.keys.length - 1) {
+      this.keys.splice(index, 1);
+      this.keys.push(key);
+    }
+  }
+  return value;
+};
+
+/**
+ * Set a value in the cache.
+ * @param {string} key The cache key.
+ * @param {*} value The value to cache.
+ */
+Blockly.Field.LRUCache_.prototype.set = function(key, value) {
+  if (this.cache[key] === undefined) {
+    // New entry
+    if (this.keys.length >= this.maxSize) {
+      // Evict oldest entry
+      var oldestKey = this.keys.shift();
+      delete this.cache[oldestKey];
+    }
+    this.keys.push(key);
+  } else {
+    // Update existing - move to end
+    var index = this.keys.indexOf(key);
+    if (index !== -1) {
+      this.keys.splice(index, 1);
+      this.keys.push(key);
+    }
+  }
+  this.cache[key] = value;
+};
+
+/**
+ * Clear all entries from the cache.
+ */
+Blockly.Field.LRUCache_.prototype.clear = function() {
+  this.cache = Object.create(null);
+  this.keys = [];
+};
+
+/**
+ * Initialize the shared measurement element.
+ * @private
+ */
+Blockly.Field.initMeasurementElement_ = function() {
+  if (Blockly.Field.measurementElement_) {
+    return;
+  }
+  
+  // Create a single shared measurement element
+  var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.style.position = 'absolute';
+  svg.style.visibility = 'hidden';
+  svg.style.left = '-9999px';
+  svg.style.pointerEvents = 'none';
+  
+  var text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  svg.appendChild(text);
+  document.body.appendChild(svg);
+  
+  Blockly.Field.measurementElement_ = {
+    svg: svg,
+    text: text
+  };
+};
+
+/**
+ * Initialize font metrics for a given class name.
+ * @param {string} className The CSS class name for the font.
+ * @private
+ */
+Blockly.Field.initFontMetrics_ = function(className) {
+  if (Blockly.Field.fontWidthCache_[className]) {
+    return;
+  }
+  
+  // Ensure shared measurement element exists
+  Blockly.Field.initMeasurementElement_();
+  
+  // Initialize LRU cache for this font
+  Blockly.Field.fontWidthCache_[className] = new Blockly.Field.LRUCache_(
+      Blockly.Field.MAX_CACHE_ENTRIES_);
+  
+  // Initialize character width cache
+  Blockly.Field.charWidthCache_[className] = {};
+  
+  // Initialize kerning cache
+  Blockly.Field.kerningCache_[className] = {};
+  
+  var text = Blockly.Field.measurementElement_.text;
+  text.setAttribute('class', className);
+  
+  // Pre-measure ALL individual characters for character-based approximation
+  var allChars =
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789' +
+    ' !"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~\u00A0';
+  
+  var charCache = Blockly.Field.charWidthCache_[className];
+  var totalChars = 0;
+  var totalWidth = 0;
+  
+  // Measure each character individually
+  for (var i = 0; i < allChars.length; i++) {
+    var char = allChars[i];
+    text.textContent = char;
+    try {
+      var width = text.getComputedTextLength();
+      charCache[char] = width;
+      totalChars++;
+      totalWidth += width;
+    } catch (e) {
+      // Skip on error
+    }
+  }
+  
+  // Pre-measure common short strings to seed the full-string cache
+  var testStrings = [
+    // Common operators and keywords
+    'if', 'to', 'do', 'for', 'and', 'or', 'not', 'set', 'get',
+    'var', 'let', 'int', 'str', 'true', 'false', 'null',
+    'while', 'else', 'return', 'break', 'continue',
+    // Common block text
+    'repeat', 'forever', 'times', 'move', 'turn', 'wait',
+    'when', 'start', 'stop', 'show', 'hide', 'say', 'think',
+    'length', 'item', 'contains', 'join', 'random'
+  ];
+  
+  var cache = Blockly.Field.fontWidthCache_[className];
+  
+  for (var i = 0; i < testStrings.length; i++) {
+    var str = testStrings[i];
+    text.textContent = str;
+    try {
+      var width = text.getComputedTextLength();
+      cache.set(str, width);
+      totalChars += str.length;
+      totalWidth += width;
+    } catch (e) {
+      // Skip on error
+    }
+  }
+  
+  // Measure common kerning pairs to improve approximation accuracy
+  var kerningPairs = [
+    'AV', 'AW', 'AY', 'FA', 'LT', 'LV', 'LW', 'LY', 'PA', 'TA', 'TO',
+    'Tr', 'Tu', 'Tw', 'Ty', 'VA', 'WA', 'Wa', 'We', 'Wo', 'Ya', 'Ye', 'Yo'
+  ];
+  
+  var kerningCache = Blockly.Field.kerningCache_[className];
+  
+  for (var i = 0; i < kerningPairs.length; i++) {
+    var pair = kerningPairs[i];
+    if (charCache[pair[0]] !== undefined && charCache[pair[1]] !== undefined) {
+      text.textContent = pair;
+      try {
+        var actualWidth = text.getComputedTextLength();
+        var expectedWidth = charCache[pair[0]] + charCache[pair[1]];
+        var kerning = actualWidth - expectedWidth;
+        if (Math.abs(kerning) > 0.1) { // Only store significant kerning
+          kerningCache[pair] = kerning;
+        }
+      } catch (e) {
+        // Skip on error
+      }
+    }
+  }
+  
+  // Calculate average character width (including kerning/spacing)
+  Blockly.Field.avgCharWidthCache_[className] = totalChars > 0 ?
+      totalWidth / totalChars : 8;
+};
+
+/**
+ * Get the cached width of a text element.
+ * @param {!Element} textElement The text element to measure.
+ * @return {number} The width of the text in pixels.
  */
 Blockly.Field.getCachedWidth = function(textElement) {
-  var key = textElement.textContent + '\n' + textElement.className.baseVal;
-  var width;
-
-  // Return the cached width if it exists.
-  if (Blockly.Field.cacheWidths_) {
-    width = Blockly.Field.cacheWidths_[key];
-    if (width) {
-      return width;
+  var className = textElement.className.baseVal || 'blocklyText';
+  var text = textElement.textContent;
+  
+  if (!text) {
+    return 0;
+  }
+  
+  // Initialize font metrics for this class if not already done
+  if (!Blockly.Field.fontWidthCache_[className]) {
+    Blockly.Field.initFontMetrics_(className);
+  }
+  
+  var cache = Blockly.Field.fontWidthCache_[className];
+  var shouldCache = text.length <= Blockly.Field.MAX_CACHE_LENGTH_;
+  
+  // Check cache first for cacheable strings
+  if (shouldCache) {
+    var cachedWidth = cache.get(text);
+    if (cachedWidth !== undefined) {
+      return cachedWidth;
+    }
+    
+    // Also check the per-session cache (if active)
+    if (Blockly.Field.cacheWidths_) {
+      var key = text + '\n' + className;
+      if (Blockly.Field.cacheWidths_[key] !== undefined) {
+        return Blockly.Field.cacheWidths_[key];
+      }
     }
   }
-
-  // Attempt to compute fetch the width of the SVG text element.
+  
+  // Try character-based approximation first (zero DOM calls!)
+  if (Blockly.Field.USE_CHAR_APPROXIMATION_) {
+    var approximateWidth = Blockly.Field.approximateWidth_(text, className);
+    if (approximateWidth !== null) {
+      // For very common patterns, trust the approximation without measuring
+      // This eliminates DOM calls for the majority of fields
+      if (shouldCache) {
+        cache.set(text, approximateWidth);
+        if (Blockly.Field.cacheWidths_) {
+          var key = text + '\n' + className;
+          Blockly.Field.cacheWidths_[key] = approximateWidth;
+        }
+      }
+      return approximateWidth;
+    }
+  }
+  
+  var width;
+  
+  // Try to measure using the shared measurement element (most efficient)
+  var measurementText = Blockly.Field.measurementElement_.text;
+  measurementText.setAttribute('class', className);
+  measurementText.textContent = text;
+  
   try {
     if (goog.userAgent.IE || goog.userAgent.EDGE) {
-      width = textElement.getBBox().width;
+      width = measurementText.getBBox().width;
     } else {
-      width = textElement.getComputedTextLength();
+      width = measurementText.getComputedTextLength();
     }
   } catch (e) {
-    // In other cases where we fail to geth the computed text. Instead, use an
-    // approximation and do not cache the result. At some later point in time
-    // when the block is inserted into the visible DOM, this method will be
-    // called again and, at that point in time, will not throw an exception.
-    return textElement.textContent.length * 8;
+    // Measurement element not ready - try the actual element
+    try {
+      if (goog.userAgent.IE || goog.userAgent.EDGE) {
+        width = textElement.getBBox().width;
+      } else {
+        width = textElement.getComputedTextLength();
+      }
+    } catch (e2) {
+      // Element not in DOM yet - use character approximation or fallback
+      var approxWidth = Blockly.Field.approximateWidth_(text, className);
+      if (approxWidth !== null) {
+        return approxWidth;
+      }
+      var avgWidth = Blockly.Field.avgCharWidthCache_[className] || 8;
+      return text.length * avgWidth;
+    }
   }
-
-  // Cache the computed width and return.
-  if (Blockly.Field.cacheWidths_) {
-    Blockly.Field.cacheWidths_[key] = width;
+  
+  // Cache the measured width if it's cacheable
+  if (shouldCache) {
+    cache.set(text, width);
+    
+    // Also cache in the per-session cache if active
+    if (Blockly.Field.cacheWidths_) {
+      var key = text + '\n' + className;
+      Blockly.Field.cacheWidths_[key] = width;
+    }
   }
+  
   return width;
+};
+
+/**
+ * Approximate the width of text using individual character widths.
+ * This avoids DOM calls entirely for strings where we have all character data.
+ * @param {string} text The text to approximate.
+ * @param {string} className The CSS class name.
+ * @return {?number} The approximate width, or null if not enough data.
+ * @private
+ */
+Blockly.Field.approximateWidth_ = function(text, className) {
+  var charCache = Blockly.Field.charWidthCache_[className];
+  if (!charCache) {
+    return null;
+  }
+  
+  var width = 0;
+  var hasAllChars = true;
+  
+  // Sum individual character widths
+  for (var i = 0; i < text.length; i++) {
+    var char = text[i];
+    if (charCache[char] === undefined) {
+      hasAllChars = false;
+      break;
+    }
+    width += charCache[char];
+  }
+  
+  if (!hasAllChars) {
+    return null;
+  }
+  
+  // Apply kerning adjustments for known pairs
+  var kerningCache = Blockly.Field.kerningCache_[className];
+  if (kerningCache && text.length > 1) {
+    for (var i = 0; i < text.length - 1; i++) {
+      var pair = text[i] + text[i + 1];
+      if (kerningCache[pair] !== undefined) {
+        width += kerningCache[pair];
+      }
+    }
+  }
+  
+  return width;
+};
+
+/**
+ * Pre-warm the font metrics cache for commonly used text.
+ * Call this during initialization to improve performance for large projects.
+ * @param {string=} opt_className Optional class name, defaults to 'blocklyText'.
+ * @param {Array<string>=} opt_commonTexts Optional array of common text strings to pre-cache.
+ */
+Blockly.Field.prewarmFontCache = function(opt_className, opt_commonTexts) {
+  var className = opt_className || 'blocklyText';
+  
+  // Initialize if not already done
+  if (!Blockly.Field.fontWidthCache_[className]) {
+    Blockly.Field.initFontMetrics_(className);
+  }
+  
+  if (opt_commonTexts && opt_commonTexts.length > 0) {
+    Blockly.Field.initMeasurementElement_();
+    
+    var text = Blockly.Field.measurementElement_.text;
+    text.setAttribute('class', className);
+    
+    var cache = Blockly.Field.fontWidthCache_[className];
+    
+    for (var i = 0; i < opt_commonTexts.length; i++) {
+      var str = opt_commonTexts[i];
+      
+      // Only pre-cache strings within the length limit
+      if (str && str.length <= Blockly.Field.MAX_CACHE_LENGTH_ &&
+          cache.get(str) === undefined) {
+        text.textContent = str;
+        try {
+          var width = text.getComputedTextLength();
+          cache.set(str, width);
+        } catch (e) {
+          // Skip on error
+        }
+      }
+    }
+  }
+};
+
+/**
+ * Clear all font metrics caches and dispose of measurement elements.
+ */
+Blockly.Field.clearFontCache = function() {
+  // Clean up the shared measurement element
+  if (Blockly.Field.measurementElement_) {
+    var svg = Blockly.Field.measurementElement_.svg;
+    if (svg && svg.parentNode) {
+      svg.parentNode.removeChild(svg);
+    }
+    Blockly.Field.measurementElement_ = null;
+  }
+  
+  // Clear all caches
+  for (var className in Blockly.Field.fontWidthCache_) {
+    if (Blockly.Field.fontWidthCache_[className].clear) {
+      Blockly.Field.fontWidthCache_[className].clear();
+    }
+  }
+  
+  Blockly.Field.fontWidthCache_ = {};
+  Blockly.Field.avgCharWidthCache_ = {};
+  Blockly.Field.charWidthCache_ = {};
+  Blockly.Field.kerningCache_ = {};
 };
 
 /**
@@ -546,7 +982,7 @@ Blockly.Field.getCachedWidth = function(textElement) {
 Blockly.Field.startCache = function() {
   Blockly.Field.cacheReference_++;
   if (!Blockly.Field.cacheWidths_) {
-    Blockly.Field.cacheWidths_ = {};
+    Blockly.Field.cacheWidths_ = Object.create(null);
   }
 };
 
