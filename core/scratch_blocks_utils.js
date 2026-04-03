@@ -30,10 +30,13 @@
  **/
 goog.provide('Blockly.scratchBlocksUtils');
 
+goog.require('Blockly.Fonts');
+goog.require('Blockly.PretextMeasurement');
+
 
 /**
- * Measure some text using a canvas in-memory.
- * Does not exist in Blockly, but needed in scratch-blocks
+ * Measure some text using pretext (no DOM layout!).
+ * Does not exist in Blockly, but needed in scratch-blocks.
  * @param {string} fontSize E.g., '10pt'
  * @param {string} fontFamily E.g., 'Arial'
  * @param {string} fontWeight E.g., '600'
@@ -41,12 +44,10 @@ goog.provide('Blockly.scratchBlocksUtils');
  * @return {number} Width of the text in px.
  * @package
  */
-Blockly.scratchBlocksUtils.measureText = function(fontSize, fontFamily,
+Blockly.scratchBlocksUtils.measureText = function(fontSize, fontFamily, 
     fontWeight, text) {
-  var canvas = document.createElement('canvas');
-  var context = canvas.getContext('2d');
-  context.font = fontWeight + ' ' + fontSize + ' ' + fontFamily;
-  return context.measureText(text).width;
+  var font = fontWeight + ' ' + fontSize + ' ' + fontFamily;
+  return Blockly.PretextMeasurement.measureWidth(text, font);
 };
 
 /**
