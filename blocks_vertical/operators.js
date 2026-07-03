@@ -30,18 +30,38 @@ goog.require('Blockly.ScratchBlocks.VerticalExtensions');
 
 Blockly.ScratchBlocks.OperatorUtils = {};
 
-Blockly.FieldOperatorButton = function(text, handlerName) {
-  Blockly.FieldOperatorButton.superClass_.constructor.call(this, text, 'blocklyOperatorButton');
+Blockly.ScratchBlocks.OperatorUtils.arrowsHidden = false;
+
+Blockly.ScratchBlocks.OperatorUtils.setArrowsHidden = function(hidden) {
+  hidden = !!hidden;
+  Blockly.ScratchBlocks.OperatorUtils.arrowsHidden = hidden;
+  var db = Blockly.Workspace.WorkspaceDB_;
+  for (var id in db) {
+    var workspace = db[id];
+    if (!workspace || !workspace.getAllBlocks) continue;
+    var blocks = workspace.getAllBlocks(false);
+    for (var i = 0; i < blocks.length; i++) {
+      var block = blocks[i];
+      if (block.inputPrefix_ && block.updateShape_) {
+        block.updateShape_();
+      }
+    }
+  }
+};
+
+Blockly.FieldOperatorButton = function(iconSrc, handlerName) {
+  Blockly.FieldOperatorButton.superClass_.constructor.call(
+      this, iconSrc, 18, 18, handlerName === 'plus' ? '+' : '-');
   this.handlerName_ = handlerName;
 };
-goog.inherits(Blockly.FieldOperatorButton, Blockly.FieldLabel);
+goog.inherits(Blockly.FieldOperatorButton, Blockly.FieldImage);
 
 Blockly.FieldOperatorButton.prototype.init = function() {
-  if (this.textElement_) return;
+  if (this.fieldGroup_) return;
   Blockly.FieldOperatorButton.superClass_.init.call(this);
-  this.textElement_.style.cursor = 'pointer';
+  this.imageElement_.style.cursor = 'pointer';
   this.mouseDownWrapper_ = Blockly.bindEventWithChecks_(
-      this.textElement_, 'mousedown', this, this.onMouseDown_);
+      this.imageElement_, 'mousedown', this, this.onMouseDown_);
 };
 
 Blockly.FieldOperatorButton.prototype.dispose = function() {
@@ -62,8 +82,17 @@ Blockly.FieldOperatorButton.prototype.onMouseDown_ = function(e) {
   }
 };
 
-Blockly.ScratchBlocks.OperatorUtils.makeButtonField = function(text, handlerName) {
-  return new Blockly.FieldOperatorButton(text, handlerName);
+Blockly.ScratchBlocks.OperatorUtils.makeButtonIcon_ = function(isPlus) {
+  var points = isPlus ? 'M7 5 L12 9 L7 13' : 'M11 5 L6 9 L11 13';
+  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" ' +
+    'viewBox="0 0 18 18"><path d="' + points + '" fill="none" stroke="#fff" ' +
+    'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+};
+
+Blockly.ScratchBlocks.OperatorUtils.makeButtonField = function(handlerName) {
+  var icon = Blockly.ScratchBlocks.OperatorUtils.makeButtonIcon_(handlerName === 'plus');
+  return new Blockly.FieldOperatorButton(icon, handlerName);
 };
 
 Blockly.ScratchBlocks.OperatorUtils.attachShadow_ = function(input, shadowType) {
@@ -172,13 +201,15 @@ Blockly.ScratchBlocks.OperatorUtils.MUTATOR_MIXIN = {
       this.removeInput_(j);
     }
 
-    var buttons = this.appendDummyInput('BUTTONS');
-    if (this.itemCount_ > this.minItems_) {
+    if (!Blockly.ScratchBlocks.OperatorUtils.arrowsHidden) {
+      var buttons = this.appendDummyInput('BUTTONS');
+      if (this.itemCount_ > this.minItems_) {
+        buttons.appendField(
+            Blockly.ScratchBlocks.OperatorUtils.makeButtonField('minus'), 'MINUS');
+      }
       buttons.appendField(
-        Blockly.ScratchBlocks.OperatorUtils.makeButtonField('◀', 'minus'), 'MINUS');
+          Blockly.ScratchBlocks.OperatorUtils.makeButtonField('plus'), 'PLUS');
     }
-    buttons.appendField(
-      Blockly.ScratchBlocks.OperatorUtils.makeButtonField('▶', 'plus'), 'PLUS');
 
     this.setInputsInline(true);
 
