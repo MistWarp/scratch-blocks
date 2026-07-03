@@ -518,19 +518,43 @@ Blockly.BlockSvg.prototype.updateColour = function() {
     }
   }
 
+  // For procedures_definition blocks, use the prototype block's color if available.
+  // This makes the "define" header match the custom block prototype inside it
+  // rather than always using the default "more" category color.
+  var defineBlockOverride = false;
+  if (this.type == Blockly.PROCEDURES_DEFINITION_BLOCK_TYPE) {
+    var defInput = this.getInput('custom_block');
+    if (defInput && defInput.connection && defInput.connection.targetBlock()) {
+      var prototypeBlock = defInput.connection.targetBlock();
+      var prototypeColour = prototypeBlock.getColour();
+      // Only override if the prototype has a custom color different from default
+      if (prototypeColour !== Blockly.Colours.more.primary) {
+        defineBlockOverride = true;
+        if (this.isGlowingBlock_ || renderShadowed) {
+          var fillColour = prototypeBlock.getColourSecondary();
+        } else {
+          var fillColour = prototypeColour;
+        }
+        strokeColour = prototypeBlock.getColourTertiary();
+      }
+    }
+  }
+
   // Render block stroke
   this.svgPath_.setAttribute('stroke', strokeColour);
 
   // Render block fill
-  if (this.isGlowingBlock_ || renderShadowed) {
-    // Use the block's shadow colour if possible.
-    if (this.getShadowColour()) {
-      var fillColour = this.getShadowColour();
+  if (!defineBlockOverride) {
+    if (this.isGlowingBlock_ || renderShadowed) {
+      // Use the block's shadow colour if possible.
+      if (this.getShadowColour()) {
+        var fillColour = this.getShadowColour();
+      } else {
+        var fillColour = this.getColourSecondary();
+      }
     } else {
-      var fillColour = this.getColourSecondary();
+      var fillColour = this.getColour();
     }
-  } else {
-    var fillColour = this.getColour();
   }
   this.svgPath_.setAttribute('fill', fillColour);
 

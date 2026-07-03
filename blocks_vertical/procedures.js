@@ -753,16 +753,16 @@ Blockly.ScratchBlocks.ProcedureUtils.setCustomColor = function(color) {
     var moreColors = Blockly.Colours.more;
     this.setColour(moreColors.primary, moreColors.secondary, moreColors.tertiary, moreColors.quaternary);
   }
-  
+
   // Update all procedure call blocks with the same procCode
   if (this.workspace && this.procCode_) {
     var allBlocks = this.workspace.getAllBlocks();
     var currentProcCode = this.procCode_;
-    
+
     for (var i = 0; i < allBlocks.length; i++) {
       var block = allBlocks[i];
-      if ((block.type === 'procedures_call' || 
-           block.type === 'procedures_prototype' || 
+      if ((block.type === 'procedures_call' ||
+           block.type === 'procedures_prototype' ||
            block.type === 'procedures_definition') &&
           block.procCode_ === currentProcCode &&
           block !== this) {
@@ -783,6 +783,12 @@ Blockly.ScratchBlocks.ProcedureUtils.setCustomColor = function(color) {
         }
       }
     }
+  }
+
+  var parentBlock = this.getParent();
+  if (parentBlock && parentBlock.type === Blockly.PROCEDURES_DEFINITION_BLOCK_TYPE &&
+    parentBlock.rendered && parentBlock.updateColour) {
+    parentBlock.updateColour();
   }
 };
 
