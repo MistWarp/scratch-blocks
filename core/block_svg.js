@@ -895,7 +895,9 @@ Blockly.BlockSvg.prototype.dispose = function(healStack, animate) {
   if (blockWorkspace.intersectionObserver) {
     blockWorkspace.intersectionObserver.unobserve(this);
   }
-  goog.dom.removeNode(this.svgGroup_);
+  if (!blockWorkspace.isClearing) {
+    goog.dom.removeNode(this.svgGroup_);
+  }
   blockWorkspace.resizeContents();
   // Sever JavaScript to DOM connections.
   this.svgGroup_ = null;

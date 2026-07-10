@@ -698,6 +698,11 @@ Blockly.Scrollbar.prototype.updateDisplay_ = function() {
  * @private
  */
 Blockly.Scrollbar.prototype.onMouseDownBar_ = function(e) {
+  if (this.workspace_.deferredRenderActive) {
+    e.stopPropagation();
+    e.preventDefault();
+    return;
+  }
   this.workspace_.markFocused();
   Blockly.Touch.clearTouchIdentifier();  // This is really a click.
   this.cleanUp_();
@@ -741,6 +746,11 @@ Blockly.Scrollbar.prototype.onMouseDownBar_ = function(e) {
  * @private
  */
 Blockly.Scrollbar.prototype.onMouseDownHandle_ = function(e) {
+  if (this.workspace_.deferredRenderActive) {
+    e.stopPropagation();
+    e.preventDefault();
+    return;
+  }
   this.workspace_.markFocused();
   this.cleanUp_();
   if (Blockly.utils.isRightButton(e)) {

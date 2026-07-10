@@ -33,6 +33,7 @@ goog.provide('Blockly.Xml');
 goog.require('Blockly.Events.BlockCreate');
 goog.require('Blockly.Events.VarCreate');
 
+goog.require('Blockly.utils');
 goog.require('goog.asserts');
 goog.require('goog.dom');
 
@@ -413,6 +414,468 @@ Blockly.Xml.clearWorkspaceAndLoadFromXml = function(xml, workspace) {
   workspace.setResizesEnabled(true);
   workspace.setToolboxRefreshEnabled(true);
   return blockIds;
+};
+
+Blockly.Xml.DEFERRED_RENDER_BUDGET_MS = 24;
+Blockly.Xml.DEFERRED_RENDER_BACKGROUND_BUDGET_MS = 10;
+Blockly.Xml.DEFERRED_SCRIPT_WIDTH_ESTIMATE = 300;
+Blockly.Xml.DEFERRED_BLOCK_HEIGHT_ESTIMATE = 30;
+
+Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred = function(xml, workspace, opt_callbacks) {
+  workspace.setResizesEnabled(false);
+  workspace.setToolboxRefreshEnabled(false);
+  Blockly.Events.disable();
+  try {
+    workspace.clear();
+  } finally {
+    Blockly.Events.enable();
+  }
+  var handle = Blockly.Xml.domToWorkspaceDeferred(xml, workspace, opt_callbacks);
+  workspace.setToolboxRefreshEnabled(true);
+  return handle;
+};
+
+Blockly.Xml.domToWorkspaceDeferred = function(xml, workspace, opt_callbacks) {
+  var callbacks = opt_callbacks || {};
+  if (!workspace.rendered) {
+    var blockIds = Blockly.Xml.domToWorkspace(xml, workspace);
+    if (callbacks.onDone) {
+      callbacks.onDone();
+    }
+    return {blockIds: blockIds, cancel: function() {}};
+  }
+  var width;
+  if (workspace.RTL) {
+    width = workspace.getWidth();
+  }
+  var scripts = [];
+  Blockly.Field.startCache();
+  var childCount = xml.childNodes.length;
+  var existingGroup = Blockly.Events.getGroup();
+  if (!existingGroup) {
+    Blockly.Events.setGroup(true);
+  }
+  if (workspace.setResizesEnabled) {
+    workspace.setResizesEnabled(false);
+  }
+  var variablesFirst = true;
+  var caughtError = null;
+  try {
+    for (var i = 0; i < childCount; i++) {
+      var xmlChild = xml.childNodes[i];
+      var name = xmlChild.nodeName.toLowerCase();
+      if (name == 'block' ||
+          (name == 'shadow' && !Blockly.Events.recordUndo)) {
+        var blockX = xmlChild.hasAttribute('x') ?
+            parseInt(xmlChild.getAttribute('x'), 10) : 10;
+        var blockY = xmlChild.hasAttribute('y') ?
+            parseInt(xmlChild.getAttribute('y'), 10) : 10;
+        var hasPosition = !isNaN(blockX) && !isNaN(blockY);
+        scripts.push({
+          xmlNode: xmlChild,
+          hasPosition: hasPosition,
+          x: hasPosition ? (workspace.RTL ? width - blockX : blockX) : 0,
+          y: hasPosition ? blockY : 0,
+          estimate: xmlChild.getElementsByTagName('block').length +
+              xmlChild.getElementsByTagName('shadow').length + 1,
+          rows: xmlChild.getElementsByTagName('next').length +
+              xmlChild.getElementsByTagName('statement').length + 1,
+          phase: -1,
+          topBlock: null,
+          blocks: null,
+          blockIndex: -1,
+          placeholder: null,
+          done: false
+        });
+        variablesFirst = false;
+      } else if (name == 'shadow') {
+        goog.asserts.fail('Shadow block cannot be a top-level block.');
+        variablesFirst = false;
+      } else if (name == 'comment') {
+        Blockly.WorkspaceCommentSvg.fromXml(xmlChild, workspace, width);
+      } else if (name == 'variables') {
+        if (variablesFirst) {
+          Blockly.Xml.domToVariables(xmlChild, workspace);
+        } else {
+          throw Error('\'variables\' tag must exist once before block and ' +
+            'shadow tag elements in the workspace XML, but it was found in ' +
+            'another location.');
+        }
+        variablesFirst = false;
+      }
+    }
+  } catch (e) {
+    caughtError = e;
+  } finally {
+    if (!existingGroup) {
+      Blockly.Events.setGroup(false);
+    }
+  }
+  var handle = Blockly.Xml.startDeferredRender_(workspace, scripts, callbacks);
+  if (caughtError) {
+    throw caughtError;
+  }
+  return handle;
+};
+
+Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
+  var totalBlocks = 0;
+  var canvas = workspace.getCanvas();
+  var phWidth = Blockly.Xml.DEFERRED_SCRIPT_WIDTH_ESTIMATE;
+  var scriptHeight = function(script) {
+    return script.rows * Blockly.Xml.DEFERRED_BLOCK_HEIGHT_ESTIMATE;
+  };
+  var updateBounds = function() {
+    var bounds = null;
+    for (var i = 0; i < scripts.length; i++) {
+      var script = scripts[i];
+      if (script.done || !script.hasPosition) {
+        continue;
+      }
+      var left = workspace.RTL ? script.x - phWidth : script.x;
+      var bottom = script.y + scriptHeight(script);
+      if (!bounds) {
+        bounds = {left: left, top: script.y,
+          right: left + phWidth, bottom: bottom};
+      } else {
+        bounds.left = Math.min(bounds.left, left);
+        bounds.top = Math.min(bounds.top, script.y);
+        bounds.right = Math.max(bounds.right, left + phWidth);
+        bounds.bottom = Math.max(bounds.bottom, bottom);
+      }
+    }
+    workspace.deferredContentBounds_ = bounds;
+  };
+  for (var i = 0; i < scripts.length; i++) {
+    var script = scripts[i];
+    totalBlocks += script.estimate;
+    if (script.hasPosition && canvas) {
+      script.placeholder = Blockly.utils.createSvgElement('rect', {
+        'class': 'blocklyScriptPlaceholder',
+        'x': workspace.RTL ? script.x - phWidth : script.x,
+        'y': script.y,
+        'width': phWidth,
+        'height': scriptHeight(script),
+        'rx': 8,
+        'ry': 8
+      }, canvas);
+    }
+  }
+  updateBounds();
+  workspace.getDeferredScripts = function() {
+    var out = [];
+    for (var i = 0; i < scripts.length; i++) {
+      var s = scripts[i];
+      if (!s.done && s.phase === -1) {
+        out.push({
+          id: s.xmlNode.getAttribute('id'),
+          type: s.xmlNode.getAttribute('type'),
+          x: s.x,
+          y: s.y,
+          xmlNode: s.xmlNode
+        });
+      }
+    }
+    return out;
+  };
+  workspace.findDeferredScriptByBlockId = function(id) {
+    for (var i = 0; i < scripts.length; i++) {
+      var s = scripts[i];
+      if (s.done || s.phase !== -1) {
+        continue;
+      }
+      if (s.xmlNode.getAttribute('id') === id) {
+        return {x: s.x, y: s.y};
+      }
+      var els = s.xmlNode.getElementsByTagName('block');
+      for (var j = 0; j < els.length; j++) {
+        if (els[j].getAttribute('id') === id) {
+          return {x: s.x, y: s.y};
+        }
+      }
+    }
+    return null;
+  };
+  var totalSteps = (totalBlocks * 2) + (scripts.length * 2);
+  var pendingCount = scripts.length;
+  var doneSteps = 0;
+  var doneBlocks = 0;
+  var finished = false;
+  var cancelled = false;
+
+  var removePlaceholder = function(script) {
+    if (script.placeholder) {
+      goog.dom.removeNode(script.placeholder);
+      script.placeholder = null;
+    }
+  };
+  var materializeScript = function(script) {
+    Blockly.Events.disable();
+    try {
+      var topBlock = Blockly.Xml.domToBlockHeadless_(script.xmlNode, workspace);
+      script.topBlock = topBlock;
+      script.blocks = topBlock.getDescendants(false);
+      topBlock.setConnectionsHidden(true);
+      var svgRoot = topBlock.getSvgRoot();
+      if (svgRoot) {
+        svgRoot.style.visibility = 'hidden';
+      }
+      if (script.hasPosition) {
+        topBlock.moveBy(script.x, script.y);
+        if (topBlock.comment && typeof topBlock.comment === 'object') {
+          var commentXY = topBlock.comment.getXY();
+          var commentWidth = topBlock.comment.getBubbleSize().width;
+          topBlock.comment.moveTo(workspace.RTL ?
+            workspace.getWidth() - commentXY.x - commentWidth : commentXY.x,
+          commentXY.y);
+        }
+      }
+      totalSteps += (script.blocks.length - script.estimate) * 2;
+      totalBlocks += script.blocks.length - script.estimate;
+    } finally {
+      Blockly.Events.enable();
+    }
+  };
+
+  var now = function() {
+    return (typeof performance != 'undefined' && performance.now) ?
+        performance.now() : Date.now();
+  };
+  var schedule = function(fn) {
+    if (typeof requestAnimationFrame == 'undefined') {
+      setTimeout(fn, 16);
+      return;
+    }
+    var fired = false;
+    var run = function() {
+      if (fired) {
+        return;
+      }
+      fired = true;
+      fn();
+    };
+    requestAnimationFrame(run);
+    setTimeout(run, 250);
+  };
+  var reportProgress = function() {
+    if (callbacks.onProgress) {
+      callbacks.onProgress(Math.min(doneSteps, totalSteps), totalSteps,
+          Math.min(doneBlocks, totalBlocks), totalBlocks);
+    }
+  };
+  var getViewport = function() {
+    if (!workspace.rendered) {
+      return null;
+    }
+    var metrics = null;
+    try {
+      metrics = workspace.getMetrics();
+    } catch (e) {
+      return null;
+    }
+    if (!metrics || !metrics.viewWidth) {
+      return null;
+    }
+    var scale = workspace.scale || 1;
+    var left = metrics.viewLeft / scale;
+    var top = metrics.viewTop / scale;
+    return {
+      left: left,
+      top: top,
+      right: left + (metrics.viewWidth / scale),
+      bottom: top + (metrics.viewHeight / scale)
+    };
+  };
+  var scriptDistance = function(script, viewport) {
+    var left = workspace.RTL ? script.x - phWidth : script.x;
+    var right = left + phWidth;
+    var bottom = script.y + scriptHeight(script);
+    var dx = viewport.left > right ? viewport.left - right :
+        (left > viewport.right ? left - viewport.right : 0);
+    var dy = viewport.top > bottom ? viewport.top - bottom :
+        (script.y > viewport.bottom ? script.y - viewport.bottom : 0);
+    return dx + dy;
+  };
+  var skipScript = function(script) {
+    if (script.phase === -1) {
+      doneSteps += 2 + (script.estimate * 2);
+      doneBlocks += script.estimate;
+    } else if (script.phase === 0) {
+      doneSteps += (script.blockIndex + 1) + script.blocks.length + 1;
+      doneBlocks += script.blocks.length;
+    } else if (script.phase === 1) {
+      doneSteps += (script.blockIndex + 1) + 1;
+      doneBlocks += script.blockIndex + 1;
+    } else {
+      doneSteps += 1;
+    }
+    removePlaceholder(script);
+    script.done = true;
+    pendingCount--;
+    updateBounds();
+  };
+  var pickScript = function(viewport) {
+    var best = null;
+    var bestDist = Infinity;
+    for (var i = 0; i < scripts.length; i++) {
+      var script = scripts[i];
+      if (script.done) {
+        continue;
+      }
+      if (script.phase !== -1 && !script.topBlock.workspace) {
+        skipScript(script);
+        continue;
+      }
+      if (!viewport) {
+        return {script: script, dist: 0};
+      }
+      var d = scriptDistance(script, viewport);
+      if (d < bestDist) {
+        bestDist = d;
+        best = script;
+        if (d === 0) {
+          break;
+        }
+      }
+    }
+    return best ? {script: best, dist: bestDist} : null;
+  };
+  var stepScript = function(script) {
+    if (script.phase === -1) {
+      try {
+        materializeScript(script);
+      } catch (e) {
+        console.warn('Deferred block materialization failed.', e);
+        skipScript(script);
+        return;
+      }
+      doneSteps++;
+      script.phase = 0;
+      script.blockIndex = script.blocks.length - 1;
+      return;
+    }
+    var topBlock = script.topBlock;
+    try {
+      if (script.phase === 2) {
+        topBlock.setConnectionsHidden(false);
+        topBlock.updateDisabled();
+        var svgRoot = topBlock.getSvgRoot();
+        if (svgRoot) {
+          svgRoot.style.visibility = '';
+        }
+      } else {
+        var block = script.blocks[script.blockIndex];
+        if (block && block.workspace) {
+          if (script.phase === 0) {
+            block.initSvg();
+          } else {
+            block.render(false);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Deferred block rendering failed.', e);
+    }
+    doneSteps++;
+    if (script.phase === 2) {
+      removePlaceholder(script);
+      script.done = true;
+      pendingCount--;
+      updateBounds();
+      if (workspace.rendered) {
+        workspace.resizeContents();
+      }
+    } else {
+      if (script.phase === 1) {
+        doneBlocks++;
+      }
+      script.blockIndex--;
+      if (script.blockIndex < 0) {
+        script.phase++;
+        script.blockIndex = script.blocks.length - 1;
+      }
+    }
+  };
+  var finish = function() {
+    if (finished) {
+      return;
+    }
+    finished = true;
+    workspace.deferredRenderActive = false;
+    workspace.deferredContentBounds_ = null;
+    workspace.getDeferredScripts = null;
+    workspace.findDeferredScriptByBlockId = null;
+    for (var i = 0; i < scripts.length; i++) {
+      removePlaceholder(scripts[i]);
+    }
+    Blockly.Field.stopCache();
+    if (workspace.rendered && workspace.setResizesEnabled) {
+      workspace.setResizesEnabled(true);
+    }
+    if (callbacks.onDone) {
+      callbacks.onDone();
+    }
+  };
+  var processFrame = function() {
+    if (finished || cancelled) {
+      return;
+    }
+    if (workspace.isDragging && workspace.isDragging()) {
+      schedule(processFrame);
+      return;
+    }
+    var viewport = getViewport();
+    var pick = pickScript(viewport);
+    var urgent = !viewport;
+    if (pick && viewport) {
+      var margin = ((viewport.right - viewport.left) +
+          (viewport.bottom - viewport.top)) / 4;
+      urgent = pick.dist <= margin;
+    }
+    var budget = urgent ? Blockly.Xml.DEFERRED_RENDER_BUDGET_MS :
+        Blockly.Xml.DEFERRED_RENDER_BACKGROUND_BUDGET_MS;
+    var deadline = now() + budget;
+    while (pick && now() < deadline) {
+      stepScript(pick.script);
+      if (pick.script.done) {
+        pick = pickScript(viewport);
+      }
+    }
+    reportProgress();
+    if (pendingCount <= 0) {
+      finish();
+    } else {
+      schedule(processFrame);
+    }
+  };
+
+  if (scripts.length) {
+    if (workspace.setResizesEnabled) {
+      workspace.setResizesEnabled(true);
+    }
+    reportProgress();
+    schedule(processFrame);
+  } else {
+    finish();
+  }
+
+  return {
+    cancel: function() {
+      if (finished || cancelled) {
+        return;
+      }
+      cancelled = true;
+      finished = true;
+      workspace.deferredRenderActive = false;
+      workspace.deferredContentBounds_ = null;
+      workspace.getDeferredScripts = null;
+      workspace.findDeferredScriptByBlockId = null;
+      for (var i = 0; i < scripts.length; i++) {
+        removePlaceholder(scripts[i]);
+      }
+      Blockly.Field.stopCache();
+    }
+  };
 };
 
 /**
@@ -917,3 +1380,7 @@ goog.global['Blockly']['Xml']['textToDom'] = Blockly.Xml.textToDom;
 goog.global['Blockly']['Xml']['workspaceToDom'] = Blockly.Xml.workspaceToDom;
 goog.global['Blockly']['Xml']['clearWorkspaceAndLoadFromXml'] =
   Blockly.Xml.clearWorkspaceAndLoadFromXml;
+goog.global['Blockly']['Xml']['domToWorkspaceDeferred'] =
+  Blockly.Xml.domToWorkspaceDeferred;
+goog.global['Blockly']['Xml']['clearWorkspaceAndLoadFromXmlDeferred'] =
+  Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred;

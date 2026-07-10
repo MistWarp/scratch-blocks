@@ -247,7 +247,11 @@ Blockly.Connection.prototype.dispose = function() {
     throw 'Disconnect connection before disposing of it.';
   }
   if (this.inDB_) {
-    this.db_.removeConnection_(this);
+    if (this.db_.bulkClear_) {
+      this.inDB_ = false;
+    } else {
+      this.db_.removeConnection_(this);
+    }
   }
   this.db_ = null;
   this.dbOpposite_ = null;

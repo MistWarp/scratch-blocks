@@ -327,6 +327,11 @@ Blockly.ScratchBlockComment.prototype.autoPosition_ = function() {
  * @package
  */
 Blockly.ScratchBlockComment.prototype.setVisible = function(visible) {
+  if (visible && !this.iconXY_) {
+    this.pendingShow_ = true;
+    return;
+  }
+  this.pendingShow_ = false;
   if (visible == this.isVisible()) {
     // No change.
     return;
@@ -484,6 +489,14 @@ Blockly.ScratchBlockComment.prototype.setText = function(text) {
   }
   if (this.textarea_) {
     this.textarea_.value = text;
+  }
+};
+
+Blockly.ScratchBlockComment.prototype.setIconLocation = function(xy) {
+  Blockly.ScratchBlockComment.superClass_.setIconLocation.call(this, xy);
+  if (this.pendingShow_) {
+    this.pendingShow_ = false;
+    this.setVisible(true);
   }
 };
 

@@ -1419,8 +1419,10 @@ Blockly.WorkspaceSvg.prototype.isDragging = function() {
  * Is this workspace draggable and scrollable?
  * @return {boolean} True if this workspace may be dragged.
  */
+Blockly.WorkspaceSvg.prototype.deferredRenderActive = false;
+
 Blockly.WorkspaceSvg.prototype.isDraggable = function() {
-  return !!this.scrollbar;
+  return !!this.scrollbar && !this.deferredRenderActive;
 };
 
 /**
@@ -1429,6 +1431,10 @@ Blockly.WorkspaceSvg.prototype.isDraggable = function() {
  * @private
  */
 Blockly.WorkspaceSvg.prototype.onMouseWheel_ = function(e) {
+  if (this.deferredRenderActive) {
+    e.preventDefault();
+    return;
+  }
   // TODO: Remove gesture cancellation and compensate for coordinate skew during
   // zoom.
   if (this.currentGesture_) {
@@ -1481,8 +1487,17 @@ Blockly.WorkspaceSvg.prototype.getBlocksBoundingBox = function() {
   var topBlocks = this.getTopBlocks(false);
   var topComments = this.getTopComments(false);
   var topElements = topBlocks.concat(topComments);
+  var deferredBounds = this.deferredContentBounds_;
   // There are no blocks, return empty rectangle.
   if (!topElements.length) {
+    if (deferredBounds) {
+      return {
+        x: deferredBounds.left,
+        y: deferredBounds.top,
+        width: deferredBounds.right - deferredBounds.left,
+        height: deferredBounds.bottom - deferredBounds.top
+      };
+    }
     return {x: 0, y: 0, width: 0, height: 0};
   }
 
@@ -1504,6 +1519,12 @@ Blockly.WorkspaceSvg.prototype.getBlocksBoundingBox = function() {
     if (blockBoundary.bottomRight.y > boundary.bottomRight.y) {
       boundary.bottomRight.y = blockBoundary.bottomRight.y;
     }
+  }
+  if (deferredBounds) {
+    boundary.topLeft.x = Math.min(boundary.topLeft.x, deferredBounds.left);
+    boundary.topLeft.y = Math.min(boundary.topLeft.y, deferredBounds.top);
+    boundary.bottomRight.x = Math.max(boundary.bottomRight.x, deferredBounds.right);
+    boundary.bottomRight.y = Math.max(boundary.bottomRight.y, deferredBounds.bottom);
   }
   return {
     x: boundary.topLeft.x,
@@ -1786,6 +1807,9 @@ Blockly.WorkspaceSvg.prototype.zoom = function(x, y, amount) {
  * @param {number} type Type of zooming (-1 zooming out and 1 zooming in).
  */
 Blockly.WorkspaceSvg.prototype.zoomCenter = function(type) {
+  if (this.deferredRenderActive) {
+    return;
+  }
   var metrics = this.getMetrics();
   var x = metrics.viewWidth / 2;
   var y = metrics.viewHeight / 2;
@@ -2218,7 +2242,27 @@ Blockly.WorkspaceSvg.prototype.setToolboxRefreshEnabled = function(enabled) {
  */
 Blockly.WorkspaceSvg.prototype.clear = function() {
   this.setResizesEnabled(false);
+  var dbList = this.connectionDBList;
+  if (dbList) {
+    for (var i = 0; i < dbList.length; i++) {
+      if (dbList[i]) {
+        dbList[i].bulkClear_ = true;
+      }
+    }
+  }
   Blockly.WorkspaceSvg.superClass_.clear.call(this);
+  if (dbList) {
+    for (var i = 0; i < dbList.length; i++) {
+      if (dbList[i]) {
+        dbList[i].connections_.length = 0;
+        dbList[i].bulkClear_ = false;
+      }
+    }
+  }
+  var canvas = this.getCanvas();
+  if (canvas) {
+    goog.dom.removeChildren(canvas);
+  }
   this.setResizesEnabled(true);
 };
 

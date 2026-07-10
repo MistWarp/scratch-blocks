@@ -366,11 +366,27 @@ Blockly.init_ = function(mainWorkspace) {
         }
       });
 
+  var resizeQueued = false;
   var workspaceResizeHandler = Blockly.bindEventWithChecks_(window, 'resize',
       null,
       function() {
-        Blockly.hideChaffOnResize(true);
-        Blockly.svgResize(mainWorkspace);
+        if (resizeQueued) {
+          return;
+        }
+        resizeQueued = true;
+        var run = function() {
+          resizeQueued = false;
+          if (!mainWorkspace.rendered) {
+            return;
+          }
+          Blockly.hideChaffOnResize(true);
+          Blockly.svgResize(mainWorkspace);
+        };
+        if (typeof requestAnimationFrame != 'undefined') {
+          requestAnimationFrame(run);
+        } else {
+          setTimeout(run, 16);
+        }
       });
   mainWorkspace.setResizeHandlerWrapper(workspaceResizeHandler);
 
