@@ -21,12 +21,62 @@ module.exports = [{
     path: path.resolve(__dirname, 'dist'),
     filename: '[name].js'
   },
+  module: {
+    rules: [
+      {
+        test: /@chenglou[\\/]pretext[\\/]dist[\\/].*\.js$/,
+        use: {
+          loader: 'babel-loader',
+          options: {
+            presets: ['@babel/preset-env'],
+            plugins: ['@babel/plugin-transform-optional-chaining']
+          }
+        }
+      }
+    ]
+  },
   optimization: {
     minimize: false
   },
   performance: {
     hints: false
   }
+}, {
+  mode: process.env.NODE_ENV === 'production' ? 'production' : 'development',
+  entry: {
+    horizontal: './shim/horizontal.js',
+    vertical: './shim/vertical.js'
+  },
+  output: {
+    library: 'Blockly',
+    libraryTarget: 'umd',
+    path: path.resolve(__dirname, 'dist', 'web'),
+    filename: '[name].js'
+  },
+  module: {
+    rules: [
+      {
+        test: /@chenglou[\\/]pretext[\\/]dist[\\/].*\.js$/,
+        use: {
+          loader: 'babel-loader',
+          options: {
+            presets: ['@babel/preset-env'],
+            plugins: ['@babel/plugin-proposal-optional-chaining']
+          }
+        }
+      }
+    ]
+  },
+  optimization: {
+    minimizer: [
+      new UglifyJsPlugin({
+        uglifyOptions: {
+          mangle: false
+        }
+      })
+    ]
+  },
+  plugins: []
 }, {
   mode: process.env.NODE_ENV === 'production' ? 'production' : 'development',
   entry: {
