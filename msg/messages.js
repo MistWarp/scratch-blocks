@@ -297,6 +297,28 @@ Blockly.Msg.SOUND_SETVOLUMETO = 'set volume to %1%';
 Blockly.Msg.SOUND_VOLUME = 'volume';
 Blockly.Msg.SOUND_RECORD = 'record...';
 
+Blockly.Msg.ASSETS_LOAD = 'load asset %1 as %2';
+Blockly.Msg.ASSETS_KIND_COSTUME = 'costume';
+Blockly.Msg.ASSETS_KIND_SOUND = 'sound';
+Blockly.Msg.ASSETS_UNLOAD = 'unload asset %1';
+Blockly.Msg.ASSETS_UNLOADALL = 'unload all assets';
+Blockly.Msg.ASSETS_GET = '%1 of asset %2';
+Blockly.Msg.ASSETS_PROPERTY_TEXT = 'text';
+Blockly.Msg.ASSETS_PROPERTY_DATAURI = 'data URI';
+Blockly.Msg.ASSETS_PROPERTY_BASE64 = 'base64';
+Blockly.Msg.ASSETS_PROPERTY_URL = 'URL';
+Blockly.Msg.ASSETS_PROPERTY_SIZE = 'size';
+Blockly.Msg.ASSETS_PROPERTY_FORMAT = 'format';
+Blockly.Msg.ASSETS_PROPERTY_FOLDER = 'folder';
+Blockly.Msg.ASSETS_BYTE = 'byte %1 of asset %2';
+Blockly.Msg.ASSETS_CHECK = 'asset %1 %2?';
+Blockly.Msg.ASSETS_STATE_EXISTS = 'exists';
+Blockly.Msg.ASSETS_STATE_LOADED = 'is loaded';
+Blockly.Msg.ASSETS_SET = 'set asset %1 to %2 as %3';
+Blockly.Msg.ASSETS_DELETE = 'delete asset %1';
+Blockly.Msg.ASSETS_ALLNAMES = 'all asset names';
+Blockly.Msg.ASSETS_INFOLDER = 'assets in folder %1';
+
 // Category labels
 Blockly.Msg.CATEGORY_MOTION = 'Motion';
 Blockly.Msg.CATEGORY_LOOKS = 'Looks';
@@ -307,6 +329,7 @@ Blockly.Msg.CATEGORY_SENSING = 'Sensing';
 Blockly.Msg.CATEGORY_OPERATORS = 'Operators';
 Blockly.Msg.CATEGORY_VARIABLES = 'Variables';
 Blockly.Msg.CATEGORY_MYBLOCKS = 'My Blocks';
+Blockly.Msg.CATEGORY_ASSETS = 'Assets';
 
 // Context menus
 Blockly.Msg.DUPLICATE = 'Duplicate';

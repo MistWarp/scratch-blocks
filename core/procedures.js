@@ -129,13 +129,68 @@ Blockly.Procedures.allProcedures = function(root) {
 Blockly.Procedures.allProcedureMutations = function(root) {
   var blocks = root.getAllBlocks();
   var mutations = [];
+  var seen = Object.create(null);
   for (var i = 0; i < blocks.length; i++) {
     if (blocks[i].type == Blockly.PROCEDURES_PROTOTYPE_BLOCK_TYPE) {
       var mutation = blocks[i].mutationToDom(/* opt_generateShadows */ true);
       if (mutation) {
+        seen[mutation.getAttribute('proccode')] = true;
         mutations.push(mutation);
       }
     }
+  }
+  var pending = Blockly.Procedures.deferredProcedureMutations_(root);
+  for (var j = 0; j < pending.length; j++) {
+    if (!seen[pending[j].getAttribute('proccode')]) {
+      mutations.push(pending[j]);
+    }
+  }
+  return mutations;
+};
+
+/**
+ * Find procedure definition mutations in scripts that a deferred workspace load
+ * has not materialized into blocks yet.
+ * @param {!Blockly.Workspace} root Root workspace.
+ * @return {!Array.<Element>} Array of mutation xml elements.
+ * @private
+ */
+Blockly.Procedures.deferredProcedureMutations_ = function(root) {
+  var mutations = [];
+  if (!root.getDeferredScripts) {
+    return mutations;
+  }
+  var scripts = root.getDeferredScripts();
+  for (var i = 0; i < scripts.length; i++) {
+    var xmlBlocks = scripts[i].xmlNode.getElementsByTagName('block');
+    var prototypeMutation = null;
+    var hasReturn = false;
+    for (var j = 0; j < xmlBlocks.length; j++) {
+      var type = xmlBlocks[j].getAttribute('type');
+      if (type == Blockly.PROCEDURES_PROTOTYPE_BLOCK_TYPE) {
+        var children = xmlBlocks[j].childNodes;
+        for (var k = 0; k < children.length; k++) {
+          if (children[k].nodeName.toLowerCase() == 'mutation') {
+            prototypeMutation = children[k];
+            break;
+          }
+        }
+      } else if (type == Blockly.PROCEDURES_RETURN_BLOCK_TYPE) {
+        hasReturn = true;
+      }
+    }
+    if (!prototypeMutation) {
+      continue;
+    }
+    var mutation = prototypeMutation.cloneNode(false);
+    mutation.setAttribute('generateshadows', true);
+    if (hasReturn) {
+      // ponytail: boolean-returning definitions show as round reporters until the
+      // script renders and the toolbox refreshes; the XML alone doesn't carry the
+      // output shape. Harmless while Blockly.Procedures.ENFORCE_TYPES is false.
+      mutation.setAttribute('return', Blockly.PROCEDURES_CALL_TYPE_REPORTER);
+    }
+    mutations.push(mutation);
   }
   return mutations;
 };
