@@ -519,6 +519,7 @@ Blockly.Xml.domToWorkspaceDeferred = function(xml, workspace, opt_callbacks) {
 };
 
 Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
+  workspace.deferredRenderActive = true;
   var totalBlocks = 0;
   var canvas = workspace.getCanvas();
   var phWidth = Blockly.Xml.DEFERRED_SCRIPT_WIDTH_ESTIMATE;
