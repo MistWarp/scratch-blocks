@@ -31,6 +31,7 @@
 goog.provide('Blockly.Xml');
 
 goog.require('Blockly.Events.BlockCreate');
+goog.require('Blockly.Frame');
 goog.require('Blockly.Events.VarCreate');
 
 goog.require('Blockly.utils');
@@ -47,6 +48,10 @@ goog.require('goog.dom');
 Blockly.Xml.workspaceToDom = function(workspace, opt_noId) {
   var xml = goog.dom.createDom('xml');
   xml.appendChild(Blockly.Xml.variablesToDom(workspace.getAllVariables()));
+  var frames = workspace.getTopFrames ? workspace.getTopFrames() : [];
+  for (var i = 0, frame; frame = frames[i]; i++) {
+    xml.appendChild(frame.toXmlWithXY());
+  }
   var comments = workspace.getTopComments(true).filter(function(topComment) {
     return topComment instanceof Blockly.WorkspaceComment;
   });
@@ -493,6 +498,9 @@ Blockly.Xml.domToWorkspaceDeferred = function(xml, workspace, opt_callbacks) {
         variablesFirst = false;
       } else if (name == 'comment') {
         Blockly.WorkspaceCommentSvg.fromXml(xmlChild, workspace, width);
+      } else if (name == 'frame') {
+        Blockly.Frame.fromXml(xmlChild, workspace);
+        variablesFirst = false;
       } else if (name == 'variables') {
         if (variablesFirst) {
           Blockly.Xml.domToVariables(xmlChild, workspace);
@@ -813,6 +821,9 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     if (workspace.rendered && workspace.setResizesEnabled) {
       workspace.setResizesEnabled(true);
     }
+    if (workspace.refreshToolboxSelection_) {
+      workspace.refreshToolboxSelection_();
+    }
     if (callbacks.onDone) {
       callbacks.onDone();
     }
@@ -946,6 +957,12 @@ Blockly.Xml.domToWorkspace = function(xml, workspace) {
         } else {
           Blockly.WorkspaceComment.fromXml(xmlChild, workspace);
         }
+      } else if (name == 'frame') {
+        // Frames are only drawn, so a headless workspace just skips them.
+        if (workspace.rendered) {
+          Blockly.Frame.fromXml(xmlChild, workspace);
+        }
+        variablesFirst = false;
       } else if (name == 'variables') {
         if (variablesFirst) {
           Blockly.Xml.domToVariables(xmlChild, workspace);

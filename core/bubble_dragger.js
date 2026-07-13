@@ -28,6 +28,7 @@ goog.provide('Blockly.BubbleDragger');
 
 goog.require('Blockly.Bubble');
 goog.require('Blockly.Events.CommentMove');
+goog.require('Blockly.Events.FrameMove');
 goog.require('Blockly.WorkspaceCommentSvg');
 
 goog.require('goog.math.Coordinate');
@@ -88,7 +89,10 @@ Blockly.BubbleDragger = function(bubble, workspace) {
    * @type {?Blockly.BlockDragSurfaceSvg}
    * @private
    */
-  this.dragSurface_ =
+  // Frames paint behind the blocks, so they stay on the block canvas for the
+  // whole drag rather than being lifted onto the drag surface, which would put
+  // them in front of everything and then drop them on the bubble canvas.
+  this.dragSurface_ = !bubble.isFrame &&
       Blockly.utils.is3dSupported() && !!workspace.getBlockDragSurface() ?
       workspace.getBlockDragSurface() : null;
 };
@@ -236,7 +240,9 @@ Blockly.BubbleDragger.prototype.endBubbleDrag = function(
  */
 Blockly.BubbleDragger.prototype.fireMoveEvent_ = function() {
   var event = null;
-  if (this.draggingBubble_.isComment) {
+  if (this.draggingBubble_.isFrame) {
+    event = new Blockly.Events.FrameMove(this.draggingBubble_);
+  } else if (this.draggingBubble_.isComment) {
     event = new Blockly.Events.CommentMove(this.draggingBubble_);
   } else if (this.draggingBubble_ instanceof Blockly.ScratchBubble) {
     event = new Blockly.Events.CommentMove(this.draggingBubble_.comment);

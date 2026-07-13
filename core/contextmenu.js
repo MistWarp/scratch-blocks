@@ -31,6 +31,8 @@
 goog.provide('Blockly.ContextMenu');
 
 goog.require('Blockly.Events.BlockCreate');
+goog.require('Blockly.Events.FrameCreate');
+goog.require('Blockly.Frame');
 goog.require('Blockly.scratchBlocksUtils');
 goog.require('Blockly.utils');
 goog.require('Blockly.utils.uiMenu');
@@ -529,6 +531,43 @@ Blockly.ContextMenu.workspaceCommentOption = function(ws, e) {
     addWsComment();
   };
   return wsCommentOption;
+};
+
+/**
+ * Make a context menu option for adding a frame on the workspace.
+ * @param {!Blockly.WorkspaceSvg} ws The workspace where the right-click
+ *     originated.
+ * @param {!Event} e The right-click mouse event.
+ * @return {!Object} A menu option, containing text, enabled, and a callback.
+ * @package
+ */
+Blockly.ContextMenu.workspaceFrameOption = function(ws, e) {
+  var addWsFrame = function() {
+    // Position the frame where the user right-clicked. The maths is the same as
+    // for a new comment: client coordinates, offset by the injection div, then
+    // by the workspace origin, then unscaled.
+    var injectionDiv = ws.getInjectionDiv();
+    var boundingRect = injectionDiv.getBoundingClientRect();
+    var clientOffsetPixels = new goog.math.Coordinate(
+        e.clientX - boundingRect.left, e.clientY - boundingRect.top);
+    var mainOffsetPixels = ws.getOriginOffsetInPixels();
+    var finalOffsetPixels = goog.math.Coordinate.difference(clientOffsetPixels,
+        mainOffsetPixels);
+    var finalOffsetMainWs = finalOffsetPixels.scale(1 / ws.scale);
+
+    var frame = new Blockly.Frame(ws, {
+      x: finalOffsetMainWs.x,
+      y: finalOffsetMainWs.y
+    });
+    Blockly.Events.fire(new Blockly.Events.FrameCreate(frame));
+  };
+
+  var wsFrameOption = {enabled: true};
+  wsFrameOption.text = Blockly.Msg.ADD_FRAME;
+  wsFrameOption.callback = function() {
+    addWsFrame();
+  };
+  return wsFrameOption;
 };
 
 // End helper functions for creating context menu options.

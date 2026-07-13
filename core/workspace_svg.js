@@ -33,6 +33,7 @@ goog.require('Blockly.ConnectionDB');
 goog.require('Blockly.constants');
 goog.require('Blockly.DataCategory');
 goog.require('Blockly.DropDownDiv');
+goog.require('Blockly.Frame');
 goog.require('Blockly.Events.BlockCreate');
 goog.require('Blockly.Gesture');
 goog.require('Blockly.Grid');
@@ -116,6 +117,10 @@ Blockly.WorkspaceSvg = function(options, opt_blockDragSurface, opt_wsDragSurface
       Blockly.DataCategory);
   this.registerToolboxCategoryCallback(Blockly.PROCEDURE_CATEGORY_NAME,
       Blockly.Procedures.flyoutCategory);
+
+  // Keep frames wrapped around the blocks that sit inside them. This is a
+  // no-op on workspaces that have no frames, such as the flyout.
+  this.addChangeListener(Blockly.Frame.onWorkspaceChange.bind(null, this));
 
   this.procedureReturnsEnabled = Blockly.Procedures.DEFAULT_ENABLE_RETURNS;
   this.initialProcedureReturnTypes_ = null;
@@ -1486,7 +1491,7 @@ Blockly.WorkspaceSvg.prototype.onMouseWheel_ = function(e) {
 Blockly.WorkspaceSvg.prototype.getBlocksBoundingBox = function() {
   var topBlocks = this.getTopBlocks(false);
   var topComments = this.getTopComments(false);
-  var topElements = topBlocks.concat(topComments);
+  var topElements = topBlocks.concat(topComments).concat(this.getTopFrames());
   var deferredBounds = this.deferredContentBounds_;
   // There are no blocks, return empty rectangle.
   if (!topElements.length) {
@@ -1603,6 +1608,9 @@ Blockly.WorkspaceSvg.prototype.showContextMenu_ = function(e) {
   if (this.options.comments) {
     menuOptions.push(Blockly.ContextMenu.workspaceCommentOption(ws, e));
   }
+
+  // Option to add a frame.
+  menuOptions.push(Blockly.ContextMenu.workspaceFrameOption(ws, e));
 
   // Option to delete all blocks.
   // Count the number of blocks that are deletable.
