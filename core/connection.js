@@ -89,6 +89,13 @@ Blockly.Connection.prototype.check_ = null;
 Blockly.Connection.prototype.shadowDom_ = null;
 
 /**
+ * Lazy stand-in for shadowDom_, set when loading from block descriptions.
+ * @type {Object}
+ * @private
+ */
+Blockly.Connection.prototype.shadowDesc_ = null;
+
+/**
  * Horizontal location of this connection.
  * @type {number}
  * @protected
@@ -723,6 +730,21 @@ Blockly.Connection.prototype.getOutputShape = function() {
  */
 Blockly.Connection.prototype.setShadowDom = function(shadow) {
   this.shadowDom_ = shadow;
+  this.shadowDesc_ = null;
+};
+
+/**
+ * Point this connection at a shadow block description instead of a DOM. The
+ * DOM is only needed if the shadow is ever respawned (the user drags the block
+ * out of this input), so building it for every input on load is wasted work;
+ * getShadowDom() builds it on demand.
+ * @param {Object} desc Block description of the shadow, or null.
+ * @param {Object} ctx Load context the description belongs to.
+ * @package
+ */
+Blockly.Connection.prototype.setShadowDesc = function(desc, ctx) {
+  this.shadowDom_ = null;
+  this.shadowDesc_ = desc ? {desc: desc, ctx: ctx} : null;
 };
 
 /**
@@ -730,6 +752,11 @@ Blockly.Connection.prototype.setShadowDom = function(shadow) {
  * @return {Element} shadow DOM representation of a block or null.
  */
 Blockly.Connection.prototype.getShadowDom = function() {
+  if (!this.shadowDom_ && this.shadowDesc_) {
+    this.shadowDom_ = Blockly.Xml.blockDescToDom(
+        this.shadowDesc_.desc, this.shadowDesc_.ctx);
+    this.shadowDesc_ = null;
+  }
   return this.shadowDom_;
 };
 

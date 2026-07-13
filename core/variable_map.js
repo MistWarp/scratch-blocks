@@ -73,6 +73,11 @@ Blockly.VariableMap.prototype.clear = function() {
 Blockly.VariableMap.prototype.renameVariable = function(variable, newName) {
   var type = variable.type;
   var conflictVar = this.getVariable(newName, type);
+  // Every block that uses the variable has to be renamed, including the ones in
+  // scripts the workspace has not rendered.
+  if (this.workspace.materializeAllScripts) {
+    this.workspace.materializeAllScripts();
+  }
   var blocks = this.workspace.getAllBlocks();
   Blockly.Events.setGroup(true);
   try {
@@ -399,6 +404,11 @@ Blockly.VariableMap.prototype.getAllVariables = function() {
  */
 Blockly.VariableMap.prototype.getVariableUsesById = function(id) {
   var uses = [];
+  // A variable used only in scripts that are not rendered is still used; the
+  // answer here decides whether they get deleted.
+  if (this.workspace.materializeAllScripts) {
+    this.workspace.materializeAllScripts();
+  }
   var blocks = this.workspace.getAllBlocks();
   // Iterate through every block and check the name.
   for (var i = 0; i < blocks.length; i++) {

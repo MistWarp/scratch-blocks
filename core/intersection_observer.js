@@ -10,23 +10,36 @@ Blockly.IntersectionObserver = function(workspace) {
 };
 
 Blockly.IntersectionObserver.prototype.observe = function(block) {
-  var index = this.observing.indexOf(block);
-  if (index === -1) {
+  if (!block.intersectionObserved_) {
+    block.intersectionObserved_ = true;
     this.observing.push(block);
   }
 };
 
 Blockly.IntersectionObserver.prototype.unobserve = function(block) {
+  if (!block.intersectionObserved_) {
+    return;
+  }
+  block.intersectionObserved_ = false;
   var index = this.observing.indexOf(block);
   if (index !== -1) {
-    this.observing = this.observing.filter(function(i) {
-      return i !== block;
-    });
+    this.observing.splice(index, 1);
   }
 };
 
+/**
+ * Stop observing everything at once. Disposing blocks one at a time would be
+ * quadratic, so workspace.clear() calls this instead.
+ */
+Blockly.IntersectionObserver.prototype.unobserveAll = function() {
+  for (var i = 0; i < this.observing.length; i++) {
+    this.observing[i].intersectionObserved_ = false;
+  }
+  this.observing.length = 0;
+};
+
 Blockly.IntersectionObserver.prototype.dispose = function() {
-  this.observing = [];
+  this.unobserveAll();
   this.workspace = null;
 };
 
@@ -68,6 +81,11 @@ Blockly.IntersectionObserver.prototype.checkForIntersections = function() {
 
   for (var i = 0; i < this.observing.length; i++) {
     var block = this.observing[i];
+    if (!block.rendered) {
+      // Size is unknown until the block renders, so any hit test would be
+      // wrong. Rendering re-queues a check.
+      continue;
+    }
     var blockPos = block.getRelativeToSurfaceXY();
     var blockSize = block.getHeightWidth();
     

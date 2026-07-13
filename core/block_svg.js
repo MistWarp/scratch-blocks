@@ -285,8 +285,13 @@ Blockly.BlockSvg.prototype.setIntersects = function(intersects) {
   if (intersects === this.intersects_) {
     return;
   }
-  this.intersects_ = intersects;
   var root = this.getSvgRoot();
+  if (!intersects && root &&
+      Blockly.utils.hasClass(root, 'blocklyDragging')) {
+    // Never hide a block out from under the cursor.
+    return;
+  }
+  this.intersects_ = intersects;
   if (!root) {
     return;
   }
@@ -306,6 +311,9 @@ Blockly.BlockSvg.prototype.updateIntersectionObserver = function() {
       }
     } else {
       this.workspace.intersectionObserver.observe(this);
+      // The block's size is only known once it has rendered, so re-check
+      // visibility now that it has.
+      this.workspace.queueIntersectionCheck();
     }
   }
 };
@@ -892,7 +900,7 @@ Blockly.BlockSvg.prototype.dispose = function(healStack, animate) {
   }
   Blockly.BlockSvg.superClass_.dispose.call(this, healStack);
 
-  if (blockWorkspace.intersectionObserver) {
+  if (blockWorkspace.intersectionObserver && !blockWorkspace.isClearing) {
     blockWorkspace.intersectionObserver.unobserve(this);
   }
   if (!blockWorkspace.isClearing) {
