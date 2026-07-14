@@ -860,7 +860,7 @@ Blockly.BlockSvg.prototype.renderCompute_ = function(iconWidth) {
       var linkedBlock = input.connection.targetBlock();
       var paddedHeight = 0;
       var paddedWidth = 0;
-      if (linkedBlock) {
+      if (linkedBlock && !this.isBooleanToggle_(input)) {
         // A block is connected to the input - use its size.
         var bBox = linkedBlock.getHeightWidth();
         paddedHeight = bBox.height;
@@ -953,7 +953,8 @@ Blockly.BlockSvg.prototype.renderCompute_ = function(iconWidth) {
 Blockly.BlockSvg.prototype.computeInputWidth_ = function(input) {
   // Empty input shape widths.
   if (input.type == Blockly.INPUT_VALUE &&
-      (!input.connection || !input.connection.isConnected())) {
+      (!input.connection || !input.connection.isConnected() ||
+      this.isBooleanToggle_(input))) {
     switch (input.connection.getOutputShape()) {
       case Blockly.OUTPUT_SHAPE_SQUARE:
         return Blockly.BlockSvg.INPUT_SHAPE_SQUARE_WIDTH;
@@ -1419,9 +1420,25 @@ Blockly.BlockSvg.prototype.renderInputShape_ = function(input, x, y) {
     // No input shape for this input - e.g., the block is an insertion marker.
     return;
   }
-  // Input shapes are only visibly rendered on non-connected slots.
-  if (input.connection.targetConnection) {
+  var toggle = this.isBooleanToggle_(input);
+  var target = input.connection.targetBlock();
+  if (target && target.type == 'operator_not') {
+    var targetRoot = target.getSvgRoot();
+    if (targetRoot) {
+      if (toggle) {
+        targetRoot.setAttribute('display', 'none');
+      } else {
+        targetRoot.removeAttribute('display');
+      }
+    }
+  }
+
+  // Input shapes are only visibly rendered on empty slots and true toggles.
+  if (input.connection.targetConnection && !toggle) {
     inputShape.setAttribute('style', 'visibility: hidden');
+    if (input.booleanToggleMark_) {
+      input.booleanToggleMark_.setAttribute('visibility', 'hidden');
+    }
   } else {
     var inputShapeX = 0, inputShapeY = 0;
     var inputShapeInfo =
@@ -1437,7 +1454,88 @@ Blockly.BlockSvg.prototype.renderInputShape_ = function(input, x, y) {
         'translate(' + inputShapeX + ',' + inputShapeY + ')');
     inputShape.setAttribute('data-argument-type', inputShapeInfo.argType);
     inputShape.setAttribute('style', 'visibility: visible');
+    if (inputShapeInfo.argType == 'boolean') {
+      this.renderBooleanToggle_(input, inputShapeX, inputShapeY, toggle);
+    }
   }
+};
+
+/**
+ * Whether an input contains the vanilla true expression `not <>`.
+ * @param {!Blockly.Input} input Input to inspect.
+ * @return {boolean} Whether this input should render as a checked toggle.
+ * @private
+ */
+Blockly.BlockSvg.prototype.isBooleanToggle_ = function(input) {
+  if (!input.connection) return false;
+  var block = input.connection.targetBlock();
+  if (!block || block.type != 'operator_not') return false;
+  var operand = block.getInput('OPERAND');
+  return !!operand && !operand.connection.isConnected();
+};
+
+/**
+ * Render and bind the compact true toggle in an empty Boolean input.
+ * @param {!Blockly.Input} input Input being rendered.
+ * @param {number} x Input shape X position.
+ * @param {number} y Input shape Y position.
+ * @param {boolean} checked Whether the input represents true.
+ * @private
+ */
+Blockly.BlockSvg.prototype.renderBooleanToggle_ = function(input, x, y,
+    checked) {
+  if (!input.booleanToggleMark_) {
+    input.booleanToggleMark_ = Blockly.utils.createSvgElement('text', {
+      'class': 'blocklyText blocklyBooleanToggle',
+      'text-anchor': 'middle',
+      'style': 'pointer-events: none; font-size: 18px;'
+    }, this.svgGroup_);
+    input.booleanToggleMark_.appendChild(
+        document.createTextNode('\u2713'));
+    input.booleanToggleMouseDownWrapper_ = Blockly.bindEventWithChecks_(
+        input.outlinePath, 'mousedown', this, function(e) {
+          this.toggleBooleanInput_(input, e);
+        });
+  }
+  input.outlinePath.style.cursor = 'pointer';
+  input.booleanToggleMark_.setAttribute('x',
+      x + Blockly.BlockSvg.INPUT_SHAPE_HEXAGONAL_WIDTH / 2);
+  input.booleanToggleMark_.setAttribute('y',
+      y + Blockly.BlockSvg.INPUT_SHAPE_HEIGHT * 0.72);
+  input.booleanToggleMark_.setAttribute('visibility',
+      checked ? 'visible' : 'hidden');
+};
+
+/**
+ * Toggle an empty Boolean input using a vanilla `operator_not` block.
+ * @param {!Blockly.Input} input Input to toggle.
+ * @param {!Event} e Mouse or touch event.
+ * @private
+ */
+Blockly.BlockSvg.prototype.toggleBooleanInput_ = function(input, e) {
+  e.stopPropagation();
+  e.preventDefault();
+  var workspace = this.workspace;
+  if (workspace.options.readOnly || workspace.isFlyout ||
+      (input.connection.isConnected() && !this.isBooleanToggle_(input))) {
+    return;
+  }
+
+  var oldGroup = Blockly.Events.getGroup();
+  if (!oldGroup) Blockly.Events.setGroup(true);
+  try {
+    if (this.isBooleanToggle_(input)) {
+      input.connection.targetBlock().dispose(false, false);
+    } else {
+      var block = workspace.newBlock('operator_not');
+      block.initSvg();
+      block.render(false);
+      input.connection.connect(block.outputConnection);
+    }
+  } finally {
+    if (!oldGroup) Blockly.Events.setGroup(false);
+  }
+  this.render();
 };
 
 /**

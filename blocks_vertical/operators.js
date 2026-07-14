@@ -136,7 +136,7 @@ Blockly.ScratchBlocks.OperatorUtils.MUTATOR_MIXIN = {
   fireMutationChange_: function(oldExtra) {
     if (Blockly.Events.isEnabled()) {
       Blockly.Events.fire(new Blockly.Events.BlockChange(
-        this, 'mutation', null, oldExtra, this.mutationToDomText_()));
+          this, 'mutation', null, oldExtra, this.mutationToDomText_()));
     }
   },
   plus: function() {
@@ -248,14 +248,20 @@ Blockly.ScratchBlocks.defineExtendableOperator = function(config) {
     prefixLabel_: config.prefixLabel || '',
     inputCheck_: config.check || null,
     shadowType_: config.shadow || null,
-    minItems_: 2,
+    minItems_: config.minItems || 2,
     init: function() {
-      this.itemCount_ = 2;
+      this.itemCount_ = this.minItems_;
+      var extensions = [config.colour || "colours_operators"];
+      if (config.output) extensions.push(config.output);
       this.jsonInit({
         "message0": "",
         "category": config.category || Blockly.Categories.operators,
-        "extensions": [config.colour || "colours_operators", config.output]
+        "extensions": extensions
       });
+      if (config.output === null) {
+        this.setOutput(true, null);
+        this.setOutputShape(Blockly.OUTPUT_SHAPE_ROUND);
+      }
       this.updateShape_();
     }
   };
@@ -280,6 +286,44 @@ Blockly.Blocks['operator_multiply'] = Blockly.ScratchBlocks.defineExtendableOper
 Blockly.Blocks['operator_divide'] = Blockly.ScratchBlocks.defineExtendableOperator({
   prefix: 'NUM', separator: '/', shadow: 'math_number', output: 'output_number'
 });
+
+Blockly.Blocks['operator_min'] = Blockly.ScratchBlocks.defineExtendableOperator({
+  prefix: 'NUM', prefixLabel: 'min', shadow: 'math_number', output: 'output_number'
+});
+
+Blockly.Blocks['operator_max'] = Blockly.ScratchBlocks.defineExtendableOperator({
+  prefix: 'NUM', prefixLabel: 'max', shadow: 'math_number', output: 'output_number'
+});
+
+Blockly.Blocks['patching_jsreporter'] = Blockly.ScratchBlocks.defineExtendableOperator({
+  prefix: 'ARG', prefixLabel: 'js', shadow: 'text', output: null,
+  colour: 'colours_looks', category: 'Patching', minItems: 1
+});
+
+Blockly.Blocks['patching_jsboolean'] = Blockly.ScratchBlocks.defineExtendableOperator({
+  prefix: 'ARG', prefixLabel: 'js', shadow: 'text', output: 'output_boolean',
+  colour: 'colours_looks', category: 'Patching', minItems: 1
+});
+
+Blockly.Blocks['patching_jscommand'] = Blockly.ScratchBlocks.defineExtendableOperator({
+  prefix: 'ARG', prefixLabel: 'js', shadow: 'text', output: 'shape_statement',
+  colour: 'colours_looks', category: 'Patching', minItems: 1
+});
+
+Blockly.Blocks['operator_clamp'] = {
+  init: function() {
+    this.jsonInit({
+      "message0": "clamp %1 between %2 and %3",
+      "args0": [
+        {"type": "input_value", "name": "NUM"},
+        {"type": "input_value", "name": "MIN"},
+        {"type": "input_value", "name": "MAX"}
+      ],
+      "category": Blockly.Categories.operators,
+      "extensions": ["colours_operators", "output_number"]
+    });
+  }
+};
 
 Blockly.Blocks['operator_random'] = {
   /**
