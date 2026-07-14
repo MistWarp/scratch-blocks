@@ -251,11 +251,17 @@ Blockly.ScratchBlocks.defineExtendableOperator = function(config) {
     minItems_: config.minItems || 2,
     init: function() {
       this.itemCount_ = this.minItems_;
+      var extensions = [config.colour || "colours_operators"];
+      if (config.output) extensions.push(config.output);
       this.jsonInit({
         "message0": "",
         "category": config.category || Blockly.Categories.operators,
-        "extensions": [config.colour || "colours_operators", config.output]
+        "extensions": extensions
       });
+      if (config.output === null) {
+        this.setOutput(true, null);
+        this.setOutputShape(Blockly.OUTPUT_SHAPE_ROUND);
+      }
       this.updateShape_();
     }
   };
@@ -290,7 +296,7 @@ Blockly.Blocks['operator_max'] = Blockly.ScratchBlocks.defineExtendableOperator(
 });
 
 Blockly.Blocks['patching_jsreporter'] = Blockly.ScratchBlocks.defineExtendableOperator({
-  prefix: 'ARG', prefixLabel: 'js', shadow: 'text', output: 'output_string',
+  prefix: 'ARG', prefixLabel: 'js', shadow: 'text', output: null,
   colour: 'colours_looks', category: 'Patching', minItems: 1
 });
 

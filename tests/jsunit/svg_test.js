@@ -125,3 +125,21 @@ function testBooleanInputToggleUsesVanillaNotBlock() {
     }
   }
 }
+
+function testPatchingReporterAcceptsBooleanConnection() {
+  svgTest_setUp();
+  try {
+    Blockly.Blocks['boolean_parent'] = {
+      init: function() {
+        this.appendValueInput('CONDITION').setCheck('Boolean');
+      }
+    };
+    var parent = svgTest_workspace.newBlock('boolean_parent');
+    var patch = svgTest_workspace.newBlock('patching_jsreporter');
+    parent.getInput('CONDITION').connection.connect(patch.outputConnection);
+    assertEquals(patch, parent.getInput('CONDITION').connection.targetBlock());
+  } finally {
+    svgTest_tearDown();
+    delete Blockly.Blocks['boolean_parent'];
+  }
+}
