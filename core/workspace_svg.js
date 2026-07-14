@@ -1624,7 +1624,100 @@ Blockly.WorkspaceSvg.prototype.getBlocksBoundingBox = function() {
 };
 
 /**
- * Clean up the workspace by ordering all the blocks in a column.
+ * Group the workspace's contents into the things that tidying moves around: a
+ * frame together with everything sitting inside it, and every block that is not
+ * in a frame. A frame and its scripts move as one, so that tidying never shakes
+ * the scripts out of their frame.
+ * @return {!Array.<!{frames: !Array.<!Blockly.Frame>,
+ *     blocks: !Array.<!Blockly.BlockSvg>}>} The units, in no particular order.
+ * @private
+ */
+Blockly.WorkspaceSvg.prototype.getCleanUpUnits_ = function() {
+  var frames = this.getTopFrames();
+  var framedBlocks = Object.create(null);
+  for (var i = 0; i < frames.length; i++) {
+    var members = frames[i].getMembers();
+    for (var j = 0; j < members.length; j++) {
+      framedBlocks[members[j].id] = true;
+    }
+  }
+
+  // A frame sitting inside another frame travels with it, so only frames that
+  // are not inside any other frame start a unit of their own.
+  var parents = Object.create(null);
+  for (i = 0; i < frames.length; i++) {
+    for (j = 0; j < frames.length; j++) {
+      var other = frames[j];
+      if (other != frames[i] && other.containsPoint(frames[i].getXY())) {
+        var parent = parents[frames[i].id];
+        if (!parent || other.getWidth() * other.getHeight() <
+            parent.getWidth() * parent.getHeight()) {
+          parents[frames[i].id] = other;
+        }
+      }
+    }
+  }
+
+  var units = [];
+  var self = this;
+  var gather = function(frame, unit) {
+    unit.frames.push(frame);
+    unit.blocks = unit.blocks.concat(frame.getMembers());
+    var all = self.getTopFrames();
+    for (var k = 0; k < all.length; k++) {
+      if (parents[all[k].id] == frame) {
+        gather(all[k], unit);
+      }
+    }
+    return unit;
+  };
+  for (i = 0; i < frames.length; i++) {
+    if (!parents[frames[i].id]) {
+      units.push(gather(frames[i], {frames: [], blocks: []}));
+    }
+  }
+
+  var topBlocks = this.getTopBlocks(false);
+  for (i = 0; i < topBlocks.length; i++) {
+    if (!framedBlocks[topBlocks[i].id]) {
+      units.push({frames: [], blocks: [topBlocks[i]]});
+    }
+  }
+  return units;
+};
+
+/**
+ * The rectangle a clean up unit covers, ignoring blocks that a collapsed frame
+ * is hiding.
+ * @param {!{frames: !Array.<!Blockly.Frame>,
+ *     blocks: !Array.<!Blockly.BlockSvg>}} unit The unit to measure.
+ * @return {!{left: number, top: number, bottom: number}} The unit's bounds.
+ * @private
+ */
+Blockly.WorkspaceSvg.prototype.getCleanUpUnitBounds_ = function(unit) {
+  var left = Infinity;
+  var top = Infinity;
+  var bottom = -Infinity;
+  var add = function(rect) {
+    left = Math.min(left, rect.topLeft.x);
+    top = Math.min(top, rect.topLeft.y);
+    bottom = Math.max(bottom, rect.bottomRight.y);
+  };
+  for (var i = 0; i < unit.frames.length; i++) {
+    add(unit.frames[i].getBoundingRectangle());
+  }
+  for (var j = 0; j < unit.blocks.length; j++) {
+    var block = unit.blocks[j];
+    if (block.getSvgRoot().style.display != 'none') {
+      add(block.getBoundingRectangle());
+    }
+  }
+  return {left: left, top: top, bottom: bottom};
+};
+
+/**
+ * Clean up the workspace by ordering all the blocks in a column. Frames keep
+ * the scripts they hold, and are tidied as a whole.
  */
 Blockly.WorkspaceSvg.prototype.cleanUp = function() {
   // Tidying only the scripts that happen to be rendered would pile them on top
@@ -1634,17 +1727,37 @@ Blockly.WorkspaceSvg.prototype.cleanUp = function() {
   }
   this.setResizesEnabled(false);
   Blockly.Events.setGroup(true);
-  var topBlocks = this.getTopBlocks(true);
-  var cursorY = 0;
-  for (var i = 0, block; block = topBlocks[i]; i++) {
-    var xy = block.getRelativeToSurfaceXY();
-    block.moveBy(-xy.x, cursorY - xy.y);
-    block.snapToGrid();
-    cursorY = block.getRelativeToSurfaceXY().y +
-        block.getHeightWidth().height + Blockly.BlockSvg.MIN_BLOCK_Y;
+
+  var units = this.getCleanUpUnits_();
+  for (var i = 0; i < units.length; i++) {
+    units[i].bounds = this.getCleanUpUnitBounds_(units[i]);
   }
+  units.sort(function(a, b) {
+    return (a.bounds.top - b.bounds.top) || (a.bounds.left - b.bounds.left);
+  });
+
+  var cursorY = 0;
+  for (i = 0; i < units.length; i++) {
+    var unit = units[i];
+    var dx = -unit.bounds.left;
+    var dy = cursorY - unit.bounds.top;
+    for (var j = 0; j < unit.frames.length; j++) {
+      unit.frames[j].moveBy(dx, dy);
+    }
+    for (var k = 0; k < unit.blocks.length; k++) {
+      unit.blocks[k].moveBy(dx, dy);
+    }
+    // Snapping a framed script would move it relative to its frame.
+    if (!unit.frames.length) {
+      unit.blocks[0].snapToGrid();
+      dy = unit.blocks[0].getRelativeToSurfaceXY().y - unit.bounds.top;
+    }
+    cursorY = unit.bounds.bottom + dy + Blockly.BlockSvg.MIN_BLOCK_Y;
+  }
+
   Blockly.Events.setGroup(false);
   this.setResizesEnabled(true);
+  this.resizeContents();
 };
 
 /**

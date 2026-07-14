@@ -749,7 +749,7 @@ Blockly.Frame.prototype.getContainedBlocks = function() {
   var contained = [];
   for (var i = 0; i < blocks.length; i++) {
     var block = blocks[i];
-    if (!this.containsPoint_(block.getBoundingRectangle().topLeft)) {
+    if (!this.containsPoint(block.getBoundingRectangle().topLeft)) {
       continue;
     }
     // Only the smallest frame containing the block owns it.
@@ -757,7 +757,7 @@ Blockly.Frame.prototype.getContainedBlocks = function() {
     for (var j = 0; j < frames.length; j++) {
       var other = frames[j];
       if (other != this &&
-          other.containsPoint_(block.getBoundingRectangle().topLeft) &&
+          other.containsPoint(block.getBoundingRectangle().topLeft) &&
           other.area_() < smallest.area_()) {
         smallest = other;
       }
@@ -783,9 +783,9 @@ Blockly.Frame.prototype.area_ = function() {
  * scripts are its own.
  * @param {!goog.math.Coordinate} xy The point, in workspace units.
  * @return {boolean} True if the point is inside the frame.
- * @private
+ * @package
  */
-Blockly.Frame.prototype.containsPoint_ = function(xy) {
+Blockly.Frame.prototype.containsPoint = function(xy) {
   return xy.x >= this.xy_.x && xy.x <= this.xy_.x + this.width_ &&
       xy.y >= this.xy_.y && xy.y <= this.xy_.y + this.height_;
 };
