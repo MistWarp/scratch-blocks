@@ -556,3 +556,23 @@ Blockly.Blocks['sensing_userid'] = {
     });
   }
 };
+
+Blockly.Blocks['sensing_stagewidth'] = {
+  init: function() {
+    this.jsonInit({
+      "message0": "stage width",
+      "category": Blockly.Categories.sensing,
+      "extensions": ["colours_sensing", "output_number"]
+    });
+  }
+};
+
+Blockly.Blocks['sensing_stageheight'] = {
+  init: function() {
+    this.jsonInit({
+      "message0": "stage height",
+      "category": Blockly.Categories.sensing,
+      "extensions": ["colours_sensing", "output_number"]
+    });
+  }
+};
