@@ -51,7 +51,7 @@ Blockly.ScratchBlocks.OperatorUtils.setArrowsHidden = function(hidden) {
 
 Blockly.FieldOperatorButton = function(iconSrc, handlerName) {
   Blockly.FieldOperatorButton.superClass_.constructor.call(
-      this, iconSrc, 18, 18, handlerName === 'plus' ? '+' : '-');
+      this, iconSrc, 12, 18, handlerName === 'plus' ? '+' : '-');
   this.handlerName_ = handlerName;
 };
 goog.inherits(Blockly.FieldOperatorButton, Blockly.FieldImage);
@@ -83,10 +83,10 @@ Blockly.FieldOperatorButton.prototype.onMouseDown_ = function(e) {
 };
 
 Blockly.ScratchBlocks.OperatorUtils.makeButtonIcon_ = function(isPlus) {
-  var points = isPlus ? 'M7 5 L12 9 L7 13' : 'M11 5 L6 9 L11 13';
-  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" ' +
-    'viewBox="0 0 18 18"><path d="' + points + '" fill="none" stroke="#fff" ' +
-    'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  var points = isPlus ? 'M4 5 L9.5 9 L4 13 Z' : 'M8 5 L2.5 9 L8 13 Z';
+  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="18" ' +
+    'viewBox="0 0 12 18"><path d="' + points + '" fill="#fff" stroke="#fff" ' +
+    'stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/></svg>';
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 };
 
