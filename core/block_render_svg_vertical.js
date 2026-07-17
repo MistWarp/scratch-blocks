@@ -27,6 +27,7 @@
 goog.provide('Blockly.BlockSvg.render');
 
 goog.require('Blockly.BlockSvg');
+goog.require('Blockly.Events.BlockCreate');
 goog.require('Blockly.scratchBlocksUtils');
 goog.require('Blockly.utils');
 
@@ -1461,7 +1462,7 @@ Blockly.BlockSvg.prototype.renderInputShape_ = function(input, x, y) {
 };
 
 /**
- * Whether an input contains the vanilla true expression `not <>`.
+ * Whether an input contains a Boolean toggle block.
  * @param {!Blockly.Input} input Input to inspect.
  * @return {boolean} Whether this input should render as a checked toggle.
  * @private
@@ -1469,7 +1470,9 @@ Blockly.BlockSvg.prototype.renderInputShape_ = function(input, x, y) {
 Blockly.BlockSvg.prototype.isBooleanToggle_ = function(input) {
   if (!input.connection) return false;
   var block = input.connection.targetBlock();
-  if (!block || block.type != 'operator_not') return false;
+  if (!block || !block.booleanToggle_ || block.type != 'operator_not') {
+    return false;
+  }
   var operand = block.getInput('OPERAND');
   return !!operand && !operand.connection.isConnected();
 };
@@ -1527,9 +1530,16 @@ Blockly.BlockSvg.prototype.toggleBooleanInput_ = function(input, e) {
     if (this.isBooleanToggle_(input)) {
       input.connection.targetBlock().dispose(false, false);
     } else {
-      var block = workspace.newBlock('operator_not');
-      block.initSvg();
-      block.render(false);
+      Blockly.Events.disable();
+      try {
+        var block = workspace.newBlock('operator_not');
+        block.booleanToggle_ = true;
+        block.initSvg();
+        block.render(false);
+      } finally {
+        Blockly.Events.enable();
+      }
+      Blockly.Events.fire(new Blockly.Events.BlockCreate(block));
       input.connection.connect(block.outputConnection);
     }
   } finally {

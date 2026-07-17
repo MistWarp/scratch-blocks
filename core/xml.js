@@ -186,6 +186,9 @@ Blockly.Xml.allFieldsToDom_ = function(block, element) {
 Blockly.Xml.blockToDom = function(block, opt_noId) {
   var element = goog.dom.createDom(block.isShadow() ? 'shadow' : 'block');
   element.setAttribute('type', block.type);
+  if (block.booleanToggle_) {
+    element.setAttribute('boolean-toggle', true);
+  }
   if (!opt_noId) {
     element.setAttribute('id', block.id);
   }
@@ -1446,6 +1449,7 @@ Blockly.Xml.domToBlockHeadless_ = function(xmlBlock, workspace) {
   }
   var id = xmlBlock.getAttribute('id');
   block = workspace.newBlock(prototypeName, id);
+  block.booleanToggle_ = xmlBlock.getAttribute('boolean-toggle') == 'true';
 
   var blockChild = null;
   for (var i = 0, xmlChild; xmlChild = xmlBlock.childNodes[i]; i++) {

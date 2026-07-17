@@ -81,7 +81,7 @@ function svgTest_newTwoFieldBlock() {
   return block;
 }
 
-function testBooleanInputToggleUsesVanillaNotBlock() {
+function testBooleanInputOnlyHidesMarkedToggleBlocks() {
   var oldMainWorkspace = Blockly.mainWorkspace;
   var oldOperatorNot = Blockly.Blocks['operator_not'];
   svgTest_setUp();
@@ -103,14 +103,25 @@ function testBooleanInputToggleUsesVanillaNotBlock() {
     block.initSvg();
     block.render(false);
     var input = block.getInput('CONDITION');
-    var event = {stopPropagation: function() {}, preventDefault: function() {}};
+    var notBlock = svgTest_workspace.newBlock('operator_not');
+    notBlock.initSvg();
+    notBlock.render(false);
+    input.connection.connect(notBlock.outputConnection);
+    block.render(false);
 
+    assertFalse(block.isBooleanToggle_(input));
+    assertNotEquals('none', notBlock.getSvgRoot().getAttribute('display'));
+
+    notBlock.dispose(false, false);
+    var event = {stopPropagation: function() {}, preventDefault: function() {}};
     block.toggleBooleanInput_(input, event);
-    assertEquals('operator_not', input.connection.targetBlock().type);
+    var toggleBlock = input.connection.targetBlock();
+    assertEquals('operator_not', toggleBlock.type);
+    assertTrue(toggleBlock.booleanToggle_);
     assertTrue(block.isBooleanToggle_(input));
     assertEquals('visible', input.booleanToggleMark_.getAttribute('visibility'));
-    assertContains('type="operator_not"',
-        Blockly.Xml.domToText(Blockly.Xml.blockToDom(block)));
+    var xml = Blockly.Xml.domToText(Blockly.Xml.blockToDom(block));
+    assertContains('boolean-toggle="true"', xml);
 
     block.toggleBooleanInput_(input, event);
     assertFalse(input.connection.isConnected());
