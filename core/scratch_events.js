@@ -211,7 +211,9 @@ Blockly.Events.EndFrameDrag = function(frame, isOutside) {
     this.xml = goog.dom.createDom('xml');
     var members = frame.getMembers();
     for (var i = 0; i < members.length; i++) {
-      this.xml.appendChild(Blockly.Xml.blockToDom(members[i], true));
+      // With XY: where each script sits relative to the frame is the only
+      // record of which scripts the copy of the frame owns.
+      this.xml.appendChild(Blockly.Xml.blockToDomWithXY(members[i], true));
     }
   }
   this.recordUndo = false;
