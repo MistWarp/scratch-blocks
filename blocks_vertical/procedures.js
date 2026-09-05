@@ -84,9 +84,8 @@ Blockly.ScratchBlocks.ProcedureUtils.callerDomToMutation = function(xmlElement) 
   this.return_ = Blockly.ScratchBlocks.ProcedureUtils.parseReturnMutation(xmlElement);
   
   // Load custom color from mutation
-  if (xmlElement.hasAttribute('customcolor')) {
-    this.customColor_ = xmlElement.getAttribute('customcolor');
-    this.setCustomColor(this.customColor_);
+  if (xmlElement.hasAttribute('customcolor') || this.customColor_) {
+    this.setCustomColor(xmlElement.getAttribute('customcolor'));
   }
   
   if (this.return_ !== Blockly.PROCEDURES_CALL_TYPE_STATEMENT) {
@@ -141,9 +140,8 @@ Blockly.ScratchBlocks.ProcedureUtils.definitionDomToMutation = function(xmlEleme
   this.warp_ = JSON.parse(xmlElement.getAttribute('warp'));
 
   // Load custom color from mutation
-  if (xmlElement.hasAttribute('customcolor')) {
-    this.customColor_ = xmlElement.getAttribute('customcolor');
-    this.setCustomColor(this.customColor_);
+  if (xmlElement.hasAttribute('customcolor') || this.customColor_) {
+    this.setCustomColor(xmlElement.getAttribute('customcolor'));
   }
 
   // Load custom folder from mutation
@@ -737,58 +735,51 @@ Blockly.ScratchBlocks.ProcedureUtils.addStringNumberExternal = function() {
  * @public
  */
 Blockly.ScratchBlocks.ProcedureUtils.setCustomColor = function(color) {
-  this.customColor_ = color;
-  if (color && color !== '#FF6680') {
-    // Override the default "more" colors with custom color
-    const c = goog.color;
-    const rgb = c.hexToRgb(color);
-
-    this.setColour(color,
-      c.rgbArrayToHex(c.darken(rgb, 0.1)),
-      c.rgbArrayToHex(c.darken(rgb, 0.2)),
-      c.rgbArrayToHex(c.darken(rgb, 0.3))
-    );
-  } else {
-    // Revert to default "more" colors
-    var moreColors = Blockly.Colours.more;
-    this.setColour(moreColors.primary, moreColors.secondary, moreColors.tertiary, moreColors.quaternary);
+  var moreColors = Blockly.Colours.more;
+  var colors = [moreColors.primary, moreColors.secondary,
+    moreColors.tertiary, moreColors.quaternary];
+  if (color && color.toUpperCase() !== '#FF6680') {
+    var rgb = goog.color.hexToRgb(color);
+    colors = [color,
+      goog.color.rgbArrayToHex(goog.color.darken(rgb, 0.1)),
+      goog.color.rgbArrayToHex(goog.color.darken(rgb, 0.2)),
+      goog.color.rgbArrayToHex(goog.color.darken(rgb, 0.3))];
   }
 
-  // Update all procedure call blocks with the same procCode
+  var relatedBlocks = [this];
   if (this.workspace && this.procCode_) {
     var allBlocks = this.workspace.getAllBlocks();
-    var currentProcCode = this.procCode_;
-
     for (var i = 0; i < allBlocks.length; i++) {
       var block = allBlocks[i];
       if ((block.type === 'procedures_call' ||
-           block.type === 'procedures_prototype' ||
-           block.type === 'procedures_definition') &&
-          block.procCode_ === currentProcCode &&
-          block !== this) {
-        block.customColor_ = color;
-        if (color && color !== '#FF6680') {
-
-          const c = goog.color;
-          const rgb = c.hexToRgb(color);
-
-          block.setColour(color,
-            c.rgbArrayToHex(c.darken(rgb, 0.1)),
-            c.rgbArrayToHex(c.darken(rgb, 0.2)),
-            c.rgbArrayToHex(c.darken(rgb, 0.3))
-          );
-        } else {
-          var moreColors = Blockly.Colours.more;
-          block.setColour(moreColors.primary, moreColors.secondary, moreColors.tertiary, moreColors.quaternary);
-        }
+           block.type === 'procedures_prototype') &&
+          block.procCode_ === this.procCode_ && block !== this) {
+        relatedBlocks.push(block);
       }
     }
   }
 
-  var parentBlock = this.getParent();
-  if (parentBlock && parentBlock.type === Blockly.PROCEDURES_DEFINITION_BLOCK_TYPE &&
-    parentBlock.rendered && parentBlock.updateColour) {
-    parentBlock.updateColour();
+  for (var i = 0; i < relatedBlocks.length; i++) {
+    var block = relatedBlocks[i];
+    block.customColor_ = color;
+    block.setColour.apply(block, colors);
+  }
+
+  // Repaint definitions, argument reporters, returns and shadow input borders
+  // after their source palette changes.
+  for (var i = 0; i < relatedBlocks.length; i++) {
+    var block = relatedBlocks[i];
+    var parent = block.getParent();
+    var root = parent && parent.type == Blockly.PROCEDURES_DEFINITION_BLOCK_TYPE ?
+      parent : block;
+    var descendants = root.getDescendants(false);
+    for (var j = 0; j < descendants.length; j++) {
+      var descendant = descendants[j];
+      if (descendant.rendered &&
+          (descendant.getProcedureColourSource_() === block || descendant.isShadow())) {
+        descendant.updateColour();
+      }
+    }
   }
 };
 

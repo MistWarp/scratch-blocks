@@ -360,6 +360,18 @@ Blockly.BlockSvg.prototype.setParent = function(newParent) {
     this.translate(oldXY.x, oldXY.y);
   }
 
+  // A moved stack can contain argument reporters or returns from a different
+  // procedure. Refresh their inherited colours after the parent has changed.
+  var descendants = this.getDescendants(false);
+  for (var i = 0; i < descendants.length; i++) {
+    var block = descendants[i];
+    if (block.rendered &&
+        (block.type == 'argument_reporter_string_number' ||
+         block.type == 'argument_reporter_boolean' ||
+         block.type == Blockly.PROCEDURES_RETURN_BLOCK_TYPE)) {
+      block.updateColour();
+    }
+  }
 };
 
 /**
