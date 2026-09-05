@@ -297,6 +297,7 @@ Blockly.BlockSvg.prototype.setIntersects = function(intersects) {
   }
   if (intersects) {
     root.style.display = '';
+    Blockly.Xml.restoreFrameVisibility_(this.workspace, this);
   } else {
     root.style.display = 'none';
   }

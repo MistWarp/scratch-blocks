@@ -173,7 +173,7 @@ Blockly.Procedures.deferredProcedureMutations_ = function(root) {
         }
       });
     } else {
-      var xmlBlocks = scripts[i].xmlNode.getElementsByTagName('block');
+      var xmlBlocks = scripts[i].xmlNode.getElementsByTagName('*');
       for (var j = 0; j < xmlBlocks.length; j++) {
         var type = xmlBlocks[j].getAttribute('type');
         if (type == Blockly.PROCEDURES_PROTOTYPE_BLOCK_TYPE) {
