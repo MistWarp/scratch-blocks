@@ -786,7 +786,7 @@ Blockly.Block.prototype.setTooltip = function(newTip) {
  * @return {string} #RRGGBB string.
  */
 Blockly.Block.prototype.getColour = function() {
-  return this.colour_;
+  return this.getProcedureColourSource_().colour_;
 };
 
 /**
@@ -794,7 +794,7 @@ Blockly.Block.prototype.getColour = function() {
  * @return {string} #RRGGBB string.
  */
 Blockly.Block.prototype.getColourSecondary = function() {
-  return this.colourSecondary_;
+  return this.getProcedureColourSource_().colourSecondary_;
 };
 
 /**
@@ -802,7 +802,7 @@ Blockly.Block.prototype.getColourSecondary = function() {
  * @return {string} #RRGGBB string.
  */
 Blockly.Block.prototype.getColourTertiary = function() {
-  return this.colourTertiary_;
+  return this.getProcedureColourSource_().colourTertiary_;
 };
 
 /**
@@ -810,7 +810,35 @@ Blockly.Block.prototype.getColourTertiary = function() {
  * @return {string} #RRGGBB string.
  */
 Blockly.Block.prototype.getColourQuaternary = function() {
-  return this.colourQuaternary_;
+  return this.getProcedureColourSource_().colourQuaternary_;
+};
+
+/**
+ * Find the procedure whose palette this block inherits. Argument names are only
+ * unique within a definition, so reporters inherit from their enclosing stack.
+ * @return {!Blockly.Block} The block holding the palette.
+ * @private
+ */
+Blockly.Block.prototype.getProcedureColourSource_ = function() {
+  if (this.isInsertionMarker()) return this;
+  var root;
+  if (this.type == Blockly.PROCEDURES_DEFINITION_BLOCK_TYPE) {
+    root = this;
+  } else if (this.type == 'argument_reporter_string_number' ||
+      this.type == 'argument_reporter_boolean' ||
+      this.type == Blockly.PROCEDURES_RETURN_BLOCK_TYPE) {
+    root = this.getRootBlock();
+  } else {
+    return this;
+  }
+  if (root.type == Blockly.PROCEDURES_DEFINITION_BLOCK_TYPE) {
+    return root.getInputTargetBlock('custom_block') || this;
+  }
+  if (root.type == Blockly.PROCEDURES_PROTOTYPE_BLOCK_TYPE ||
+      root.type == 'procedures_declaration') {
+    return root;
+  }
+  return this;
 };
 
 /**
