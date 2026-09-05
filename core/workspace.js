@@ -548,6 +548,14 @@ Blockly.Workspace.prototype.undo = function(redo) {
     outputStack.push(event);
   }
   events = Blockly.Events.filter(events, redo);
+  if (this.materializeScriptsForBlockIds) {
+    var ids = [];
+    events.forEach(function(event) {
+      ids.push(event.blockId, event.oldParentId, event.newParentId);
+      if (event.ids) ids = ids.concat(event.ids);
+    });
+    this.materializeScriptsForBlockIds(ids);
+  }
   Blockly.Events.recordUndo = false;
   if (Blockly.selected) {
     Blockly.Events.disable();

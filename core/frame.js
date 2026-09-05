@@ -605,6 +605,7 @@ Blockly.Frame.prototype.dragMembersTo_ = function(x, y) {
  */
 Blockly.Frame.prototype.setDragging = function(adding) {
   if (adding) {
+    this.materializeForEdit_(false);
     this.bringToFront();
     this.dragMembers_ = this.getMembers();
     this.lastDragXY_ = this.getXY();
@@ -817,6 +818,7 @@ Blockly.Frame.prototype.setCollapsed = function(collapsed) {
   if (this.collapsed_ == collapsed) {
     return;
   }
+  this.materializeForEdit_(true);
   // Read the members before the collapsed flag changes which list is in use.
   var members = this.getMembers();
   var oldIds = this.blockIds_;
@@ -844,6 +846,25 @@ Blockly.Frame.prototype.setCollapsed = function(collapsed) {
 
   this.setSize(this.width_, this.height_);
   this.workspace.resizeContents();
+};
+
+/**
+ * Load scripts affected by a frame edit, leaving unrelated scripts unloaded.
+ * @param {boolean} includeBelow Include scripts shifted by collapsing a frame.
+ * @private
+ */
+Blockly.Frame.prototype.materializeForEdit_ = function(includeBelow) {
+  var workspace = this.workspace;
+  if (!workspace.getDeferredScripts || !workspace.materializeScriptsForBlockIds) return;
+  var frame = this;
+  var threshold = this.xy_.y + (this.collapsed_ ? Blockly.Frame.TOP_BAR_HEIGHT : this.height_);
+  var ids = workspace.getTopBlocks(false).map(function(block) { return block.id; });
+  workspace.getDeferredScripts().forEach(function(script) {
+    var member = frame.collapsed_ ? frame.blockIds_.indexOf(script.id) !== -1 :
+        frame.containsPoint(script);
+    if (member || (includeBelow && script.y >= threshold)) ids.push(script.id);
+  });
+  workspace.materializeScriptsForBlockIds(ids);
 };
 
 /**
