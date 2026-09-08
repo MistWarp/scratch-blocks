@@ -231,6 +231,62 @@ function test_descriptionBuilderYieldsWithinOneLargeStack() {
   });
 }
 
+function test_connectRenderedStatementsAlignsConnections() {
+  deferredXmlTest(function(ws) {
+    var parent = ws.newBlock('deferred_test');
+    var child = ws.newBlock('deferred_test');
+    parent.initSvg();
+    child.initSvg();
+    parent.render();
+    child.render();
+    parent.moveBy(120, 80);
+    child.moveBy(350, 200);
+    parent.nextConnection.connect(child.previousConnection);
+    assertEquals(parent, child.getParent());
+    assertEquals('Connected notches must share a position', 0,
+        parent.nextConnection.distanceFrom(child.previousConnection));
+  });
+}
+
+function test_dragInsertKeepsStackInPlaceAndAttachesOnRelease() {
+  deferredXmlTest(function(ws) {
+    var parent = ws.newBlock('deferred_test');
+    var child = ws.newBlock('deferred_test');
+    var inserted = ws.newBlock('deferred_test');
+    [parent, child, inserted].forEach(function(block) {
+      block.initSvg();
+      block.render();
+    });
+    parent.moveBy(120, 80);
+    parent.nextConnection.connect(child.previousConnection);
+    // Establish an aligned starting stack independently of connect's reflow.
+    parent.render();
+    inserted.moveBy(400, 300);
+    ws.isDeleteArea = function() { return Blockly.DELETE_AREA_NONE; };
+    ws.isInsideBlocksArea = function() { return true; };
+    var dragger = new Blockly.BlockDragger(inserted, ws);
+    var origin = parent.getRelativeToSurfaceXY();
+    var delta = new goog.math.Coordinate(
+        parent.nextConnection.x_ - inserted.previousConnection.x_ + 3,
+        parent.nextConnection.y_ - inserted.previousConnection.y_ + 3);
+    try {
+      dragger.startBlockDrag(new goog.math.Coordinate(0, 0));
+      dragger.dragBlock({}, delta, true);
+      assertEquals('Preview must keep the existing stack aligned', 0,
+          child.previousConnection.distanceFrom(child.previousConnection.targetConnection));
+      dragger.endBlockDrag({}, delta);
+      assertEquals(inserted, parent.getNextBlock());
+      assertEquals(child, inserted.getNextBlock());
+      assertEquals(0, parent.nextConnection.distanceFrom(inserted.previousConnection));
+      assertEquals(0, inserted.nextConnection.distanceFrom(child.previousConnection));
+      assertEquals(origin.x, parent.getRelativeToSurfaceXY().x);
+      assertEquals(origin.y, parent.getRelativeToSurfaceXY().y);
+    } finally {
+      dragger.dispose();
+    }
+  });
+}
+
 function test_asyncWorkspaceClearCancellationUsesNewestTarget() {
   deferredXmlTest(function(ws, ctx, view, flush) {
     for (var i = 0; i < 120; i++) ws.newBlock('deferred_test', 'old' + i);
@@ -268,7 +324,7 @@ function test_unchangedTextInputDoesNotRenderOrResize() {
   }
 }
 
-function test_textEditReflowsEnclosingInputWithoutRenderingPreviousStatements() {
+function test_textEditReflowsEnclosingInputAndKeepsStatementsAligned() {
   deferredXmlTest(function(ws, ctx) {
     Blockly.Blocks.deferred_surround = {init: function() {
       this.appendStatementInput('BODY');
@@ -276,7 +332,6 @@ function test_textEditReflowsEnclosingInputWithoutRenderingPreviousStatements() 
       this.setNextStatement(true);
       this.setColour('#123456');
     }};
-    var originalRender = Blockly.BlockSvg.prototype.render;
     try {
       ctx.blocks = {outer: {id: 'outer', opcode: 'deferred_surround', inputs: {
         BODY: {name: 'BODY', block: 'edit0'}}, fields: {}}};
@@ -288,16 +343,14 @@ function test_textEditReflowsEnclosingInputWithoutRenderingPreviousStatements() 
       }
       Blockly.Xml.descsToWorkspace_(ctx, ws);
       var width = ws.getBlockById('outer').width;
-      var renders = 0;
-      Blockly.BlockSvg.prototype.render = function(bubble) {
-        renders++;
-        return originalRender.call(this, bubble);
-      };
       ws.getBlockById('edit99').setFieldValue('a substantially wider input value', 'TEXT');
-      assertEquals('Only the edited block and enclosing block reflow', 2, renders);
       assertTrue('The enclosing statement still grows', ws.getBlockById('outer').width > width);
+      for (var i = 0; i < 100; i++) {
+        var connection = ws.getBlockById('edit' + i).previousConnection;
+        assertEquals('Editing must preserve statement alignment', 0,
+            connection.distanceFrom(connection.targetConnection));
+      }
     } finally {
-      Blockly.BlockSvg.prototype.render = originalRender;
       delete Blockly.Blocks.deferred_surround;
     }
   });
