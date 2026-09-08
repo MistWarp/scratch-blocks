@@ -630,8 +630,9 @@ Blockly.BlockSvg.prototype.getHeightWidth = function() {
  * Lays out and reflows a block based on its contents and settings.
  * @param {boolean=} opt_bubble If false, just render this block.
  *   If true, also render block's parent, grandparent, etc.  Defaults to true.
+ * @param {boolean=} opt_deferConnections Position connections in a later pass.
  */
-Blockly.BlockSvg.prototype.render = function(opt_bubble) {
+Blockly.BlockSvg.prototype.render = function(opt_bubble, opt_deferConnections) {
   Blockly.Field.startCache();
   this.rendered = true;
 
@@ -664,7 +665,7 @@ Blockly.BlockSvg.prototype.render = function(opt_bubble) {
 
   var inputRows = this.renderCompute_(cursorX);
   this.renderDraw_(cursorX, inputRows);
-  this.renderMoveConnections_();
+  if (!opt_deferConnections) this.renderMoveConnections_();
 
   this.renderClassify_();
 
@@ -1838,6 +1839,28 @@ Blockly.BlockSvg.prototype.renderMoveConnections_ = function() {
     this.nextConnection.moveToOffset(blockTL);
     if (this.nextConnection.isConnected()) {
       this.nextConnection.tighten_();
+    }
+  }
+};
+
+/**
+ * Position one freshly loaded block after all script shapes have been measured.
+ * Parents run before children, so each descendant and connection moves once.
+ * @param {!goog.math.Coordinate} blockTL Position in workspace coordinates.
+ * @private
+ */
+Blockly.BlockSvg.prototype.renderDeferredConnections_ = function(blockTL) {
+  var connections = this.getConnections_(true);
+  for (var i = 0; i < connections.length; i++) {
+    var connection = connections[i];
+    connection.moveToOffset(blockTL);
+    if (connection.isSuperior() && connection.isConnected()) {
+      var childConnection = connection.targetConnection;
+      var child = childConnection.getSourceBlock();
+      var dx = connection.offsetInBlock_.x - childConnection.offsetInBlock_.x;
+      var dy = connection.offsetInBlock_.y - childConnection.offsetInBlock_.y;
+      child.translate(dx, dy);
+      child.deferredRenderXY_ = new goog.math.Coordinate(blockTL.x + dx, blockTL.y + dy);
     }
   }
 };
