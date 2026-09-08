@@ -6,6 +6,7 @@ goog.require('goog.testing.MockClock');
 function deferredXmlTest(run) {
   var clock = new goog.testing.MockClock(true);
   var oldRaf = window.requestAnimationFrame;
+  var oldCache = Blockly.Xml.VIRTUAL_CACHE_BLOCKS;
   var oldDelay = Blockly.Xml.VIRTUAL_UNLOAD_DELAY_MS;
   var frames = [];
   window.requestAnimationFrame = function(callback) { frames.push(callback); };
@@ -56,6 +57,7 @@ function deferredXmlTest(run) {
     Blockly.Events.enable();
     window.requestAnimationFrame = oldRaf;
     Blockly.Xml.VIRTUAL_UNLOAD_DELAY_MS = oldDelay;
+    Blockly.Xml.VIRTUAL_CACHE_BLOCKS = oldCache;
     clock.dispose();
     delete Blockly.Blocks.deferred_test;
     delete Blockly.Blocks.deferred_number;
@@ -84,6 +86,7 @@ function test_deferredLoadViewportAndExport() {
 
 function test_deferredUnloadPreservesEditsAndUndo() {
   deferredXmlTest(function(ws, ctx, view, flush, clock) {
+    Blockly.Xml.VIRTUAL_CACHE_BLOCKS = 0;
     ctx.blocks.cold = {id: 'cold', opcode: 'deferred_test', topLevel: true,
       x: 200000, y: 10, inputs: {}, fields: {TEXT: {name: 'TEXT', value: 'cold'}}};
     ctx.scripts.push('cold');
@@ -352,6 +355,73 @@ function test_textEditReflowsEnclosingInputAndKeepsStatementsAligned() {
       }
     } finally {
       delete Blockly.Blocks.deferred_surround;
+    }
+  });
+}
+
+function test_deferredCacheRetainsVisitedScripts() {
+  deferredXmlTest(function(ws, ctx, view, flush, clock) {
+    var progress = [];
+    Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {
+      onProgress: function(value) { progress.push(value.phase); }
+    }, ctx);
+    flush();
+    var near = ws.getBlockById('near');
+    near.setFieldValue('cached edit', 'TEXT');
+    view.viewLeft = 100000;
+    ws.wakeVirtualScripts_();
+    flush();
+    clock.tick(130000);
+    flush();
+    assertEquals('Offscreen scripts below the cache budget keep their blocks', near, ws.getBlockById('near'));
+    view.viewLeft = 0;
+    ws.wakeVirtualScripts_();
+    flush();
+    assertEquals('cached edit', ws.getBlockById('near').getFieldValue('TEXT'));
+    assertEquals('Progress settles again after scrolling', 'idle', progress[progress.length - 1]);
+  });
+}
+
+function test_deferredBrokenScriptDoesNotBlockOtherScripts() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    ctx.blocks.near.opcode = 'unknown_test_block';
+    ctx.blocks.far.x = 50;
+    var status;
+    Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {
+      onProgress: function(value) { status = value; }
+    }, ctx);
+    flush();
+    assertNotNull(ws.getBlockById('far'));
+    assertEquals('error', status.phase);
+    assertEquals(1, status.failures);
+  });
+}
+
+function test_deferredProgressReportsWorkAndCompletion() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    var oldNow = performance.now;
+    var oldBudget = Blockly.Xml.DEFERRED_RENDER_BUDGET_MS;
+    var time = 0;
+    var updates = [];
+    // Make each frame do one step so even this tiny script spans all phases.
+    Blockly.Xml.DEFERRED_RENDER_BUDGET_MS = 2;
+    performance.now = function() { return time++; };
+    try {
+      Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {
+        onProgress: function(value) { updates.push(value); }
+      }, ctx);
+      flush();
+      var phases = updates.map(function(update) { return update.phase; });
+      assertTrue(phases.indexOf('building') !== -1);
+      assertTrue(phases.indexOf('drawing') !== -1);
+      assertTrue(phases.indexOf('layout') !== -1);
+      assertEquals('idle', phases[phases.length - 1]);
+      updates.forEach(function(update) {
+        assertTrue(update.completed >= 0 && update.completed <= update.total);
+      });
+    } finally {
+      performance.now = oldNow;
+      Blockly.Xml.DEFERRED_RENDER_BUDGET_MS = oldBudget;
     }
   });
 }

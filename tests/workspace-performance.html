@@ -8,7 +8,7 @@
 <script src="../blocks_compressed.js"></script>
 <script src="../blocks_compressed_vertical.js"></script>
 <script src="../msg/messages.js"></script>
-<button id="run">Run 1,200-block load and unload</button>
+<button id="run">Run 1,200-block load, revisit and eviction</button>
 <pre id="result">Ready</pre>
 <div id="workspace" style="width:800px;height:600px"></div>
 <script>
@@ -27,6 +27,7 @@
         inputs:{},fields:{NUM:{name:'NUM',value:String(i)}}};
     }
     const unloadDelay = Blockly.Xml.VIRTUAL_UNLOAD_DELAY_MS;
+    const cacheBudget = Blockly.Xml.VIRTUAL_CACHE_BLOCKS;
     const raf = window.requestAnimationFrame;
     const interval = window.setInterval;
     const samples = [];
@@ -66,8 +67,19 @@
         workspace.getBlockById('n599').setFieldValue(String(100000+i),'NUM');
         edits.push(performance.now()-editStart);
       }
+      const cachedRoot=workspace.getBlockById('b0');
+      view.viewLeft=100000;
+      workspace.wakeVirtualScripts_();
+      await new Promise(resolve=>setTimeout(resolve,2200));
+      const retainedOffscreen=workspace.getBlockById('b0')===cachedRoot;
+      const revisitStart=performance.now();
+      view.viewLeft=0;
+      workspace.wakeVirtualScripts_();
+      await new Promise(resolve=>raf.call(window,resolve));
+      const revisitMs=performance.now()-revisitStart;
       samples.length=0;
       unloading=true;
+      Blockly.Xml.VIRTUAL_CACHE_BLOCKS=0;
       Blockly.Xml.VIRTUAL_UNLOAD_DELAY_MS=0;
       view.viewLeft=100000;
       workspace.wakeVirtualScripts_();
@@ -76,7 +88,7 @@
         await new Promise(resolve=>setTimeout(resolve,20));
       }
       const unloadMs=performance.now()-unloadStart;
-      result.textContent=JSON.stringify({loadMs,initialTaskMs:returned,
+      result.textContent=JSON.stringify({loadMs,initialTaskMs:returned,retainedOffscreen,revisitMs,
         maxLoadFrameMs:Math.max(0,...loadFrames),loadFrames:loadFrames.length,
         maxInputEditMs:Math.max(...edits),
         maxUnloadFrameMs:Math.max(0,...samples),maxSweepMs:Math.max(0,...background),
@@ -87,6 +99,7 @@
       instrumented.forEach(([obj,key],i)=>obj[key]=originals[i]);
       workspace.dispose();
       Blockly.Xml.VIRTUAL_UNLOAD_DELAY_MS=unloadDelay;
+      Blockly.Xml.VIRTUAL_CACHE_BLOCKS=cacheBudget;
       window.requestAnimationFrame=raf;
       window.setInterval=interval;
       this.disabled=false;
