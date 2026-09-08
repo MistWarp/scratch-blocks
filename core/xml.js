@@ -732,6 +732,8 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
   var lastProgress = -Infinity;
   var lastProgressPhase = null;
   var failures = 0;
+  var deferredConnections = !!Blockly.BlockSvg.prototype.renderDeferredConnections_;
+  var finalPhase = deferredConnections ? 3 : 2;
   var reportProgress = function(script, paused) {
     if (!callbacks.onProgress) return;
     var t = now();
@@ -745,7 +747,9 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
       phase: phase,
       completed: !script ? 0 : script.phase === -1 ?
           (script.builder ? script.builder.blocks.length : 0) :
-          script.phase === 2 ? script.blocks.length : script.blocks.length - script.blockIndex - 1,
+          script.phase === finalPhase ? script.blocks.length :
+          deferredConnections && script.phase === 2 ? script.blockIndex :
+          script.blocks.length - script.blockIndex - 1,
       total: script ? (script.blocks ? script.blocks.length : script.estimate) : 0,
       failures: failures
     });
@@ -835,7 +839,9 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
         }
         if (!script.builder.step()) return false;
         topBlock = script.builder.root;
-        script.blocks = script.builder.blocks;
+        // Mutations may also create default argument shadows. Include them in
+        // the parent-first positioning pass.
+        script.blocks = topBlock.getDescendants(false);
         script.builder = null;
       } else {
         topBlock = Blockly.Xml.domToBlockHeadless_(script.xmlNode, workspace);
@@ -1033,7 +1039,7 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     }
     var topBlock = script.topBlock;
     try {
-      if (script.phase === 2) {
+      if (script.phase === finalPhase) {
         topBlock.setConnectionsHidden(false);
         topBlock.updateDisabled();
         if (workspace.restoreGlows) {
@@ -1050,8 +1056,11 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
         if (block && block.workspace) {
           if (script.phase === 0) {
             block.initSvg();
+          } else if (deferredConnections && script.phase === 2) {
+            block.renderDeferredConnections_(block.deferredRenderXY_ || block.getRelativeToSurfaceXY());
+            delete block.deferredRenderXY_;
           } else {
-            block.render(false);
+            block.render(false, deferredConnections);
             if (block !== topBlock && block.getSvgRoot()) block.getSvgRoot().style.visibility = '';
           }
         }
@@ -1060,16 +1069,22 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
       console.warn('Deferred block rendering failed.', e);
       failures++;
     }
-    if (script.phase === 2) {
+    if (script.phase === finalPhase) {
       removePlaceholder(script);
       script.loaded = true;
       script.lastNear = now();
       boundsDirty = true;
+    } else if (deferredConnections && script.phase === 2) {
+      if (++script.blockIndex >= script.blocks.length) script.phase++;
     } else {
       script.blockIndex--;
       if (script.blockIndex < 0) {
         script.phase++;
-        script.blockIndex = script.blocks.length - 1;
+        if (deferredConnections && script.phase === 2) {
+          // Drawing can add boolean toggle shadows or remove obsolete ones.
+          script.blocks = topBlock.getDescendants(false);
+        }
+        script.blockIndex = deferredConnections && script.phase === 2 ? 0 : script.blocks.length - 1;
       }
     }
   };
@@ -1983,7 +1998,9 @@ Blockly.Xml.createDescBlockBuilder_ = function(desc, ctx, workspace, hide) {
       if (!result.root) result.root = block;
       if (d.mutation && block.domToMutation) {
         block.domToMutation(Blockly.Xml.mutationDescToDom_(d.mutation));
-        if (block.initSvg) block.initSvg();
+        // The deferred SVG pass initializes the final inputs once. Doing it
+        // here too lays out partially constructed scripts between frames.
+        if (!hide && block.initSvg) block.initSvg();
       }
       if (hide && block.setConnectionsHidden) {
         block.setConnectionsHidden(true);

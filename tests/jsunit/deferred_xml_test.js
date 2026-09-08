@@ -425,3 +425,47 @@ function test_deferredProgressReportsWorkAndCompletion() {
     }
   });
 }
+
+function test_deferredNestedLayoutMatchesSynchronousLayout() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    ctx = {blocks: {}, scripts: ['repeat0'], comments: {}};
+    for (var i = 0; i < 30; i++) {
+      var id = 'repeat' + i;
+      var number = 'number' + i;
+      ctx.blocks[id] = {id: id, opcode: 'control_repeat', topLevel: i === 0,
+        x: 20, y: 30, fields: {}, inputs: {
+          TIMES: {name: 'TIMES', block: number, shadow: number},
+          SUBSTACK: {name: 'SUBSTACK', block: i < 29 ? 'repeat' + (i + 1) : 'leaf'}
+        }};
+      ctx.blocks[number] = {id: number, opcode: 'math_number', shadow: true,
+        fields: {NUM: {name: 'NUM', value: i}}, inputs: {}};
+    }
+    ctx.blocks.leaf = {id: 'leaf', opcode: 'patching_jscommand', fields: {},
+      mutation: {tagName: 'mutation', itemcount: '2', children: []}, inputs: {
+        ARG1: {name: 'ARG1', block: 'code', shadow: 'code'},
+        ARG2: {name: 'ARG2', block: 'value', shadow: 'value'}
+      }};
+    ctx.blocks.code = {id: 'code', opcode: 'text', shadow: true, inputs: {},
+      fields: {TEXT: {name: 'TEXT', value: 'console.log(value)'}}};
+    ctx.blocks.value = {id: 'value', opcode: 'text', shadow: true, inputs: {},
+      fields: {TEXT: {name: 'TEXT', value: 'nested argument'}}};
+    Blockly.Xml.clearWorkspaceAndLoadFromDescs(Blockly.Xml.textToDom('<xml/>'), ctx, ws);
+    var positions = {};
+    ws.getAllBlocks().forEach(function(block) {
+      positions[block.id] = block.getRelativeToSurfaceXY();
+    });
+    Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {}, ctx);
+    flush();
+    ws.getAllBlocks().forEach(function(block) {
+      var xy = block.getRelativeToSurfaceXY();
+      assertEquals(block.id + ' x', positions[block.id].x, xy.x);
+      assertEquals(block.id + ' y', positions[block.id].y, xy.y);
+      block.getConnections_(true).forEach(function(connection) {
+        if (connection.isConnected()) assertEquals('Connections align', 0,
+            connection.distanceFrom(connection.targetConnection));
+      });
+      assertUndefined(block.deferredRenderXY_);
+    });
+    assertEquals('Finished script is visible', '', ws.getBlockById('repeat0').getSvgRoot().style.display);
+  });
+}
