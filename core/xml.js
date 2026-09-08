@@ -471,7 +471,7 @@ Blockly.Xml.createBlockDisposer_ = function(topBlock) {
   }};
 };
 
-Blockly.Xml.DEFERRED_RENDER_BUDGET_MS = 4;
+Blockly.Xml.DEFERRED_RENDER_BUDGET_MS = 8;
 Blockly.Xml.DEFERRED_RENDER_BACKGROUND_BUDGET_MS = 2;
 Blockly.Xml.DEFERRED_SCRIPT_WIDTH_ESTIMATE = 300;
 Blockly.Xml.DEFERRED_BLOCK_HEIGHT_ESTIMATE = 48;
@@ -493,7 +493,11 @@ Blockly.Xml.VIRTUAL_UNLOAD_SCREENS = 2;
 /**
  * How long a script has to have been out of range before it is unloaded.
  */
-Blockly.Xml.VIRTUAL_UNLOAD_DELAY_MS = 20000;
+Blockly.Xml.VIRTUAL_UNLOAD_DELAY_MS = 120000;
+
+// Keep visited scripts as a cache. Only evict cold scripts above this soft
+// block budget; visible and actively edited scripts are always retained.
+Blockly.Xml.VIRTUAL_CACHE_BLOCKS = 20000;
 
 Blockly.Xml.VIRTUAL_SWEEP_INTERVAL_MS = 2000;
 
@@ -512,7 +516,7 @@ Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred = function(xml, workspace,
   if (Object.keys(workspace.blockDB_ || {}).length >= 100 && workspace.rendered) {
     return Blockly.Xml.clearWorkspaceInFrames_(workspace, function() {
       return Blockly.Xml.domToWorkspaceDeferred(xml, workspace, opt_callbacks, opt_descs);
-    });
+    }, opt_callbacks);
   }
   workspace.setResizesEnabled(false);
   workspace.setToolboxRefreshEnabled(false);
@@ -528,7 +532,7 @@ Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred = function(xml, workspace,
 };
 
 /** Clear old scripts without a recursive, frame-blocking workspace disposal. */
-Blockly.Xml.clearWorkspaceInFrames_ = function(workspace, load) {
+Blockly.Xml.clearWorkspaceInFrames_ = function(workspace, load, callbacks) {
   workspace.cancelDeferredRender();
   workspace.cancelCurrentGesture();
   if (Blockly.WidgetDiv) Blockly.WidgetDiv.hide(true);
@@ -537,6 +541,8 @@ Blockly.Xml.clearWorkspaceInFrames_ = function(workspace, load) {
   var loader = null;
   var roots = workspace.getTopBlocks(false).slice();
   var disposer = null;
+  var total = workspace.getAllBlocks().length;
+  var completed = 0;
   // Make the old target unavailable for pointer interaction immediately.
   var canvas = workspace.getCanvas();
   var visibility = canvas.style.visibility;
@@ -559,7 +565,11 @@ Blockly.Xml.clearWorkspaceInFrames_ = function(workspace, load) {
         disposer = Blockly.Xml.createBlockDisposer_(root);
       }
       if (disposer.step()) disposer = null;
+      completed++;
     } while (performance.now() < deadline);
+    if (callbacks && callbacks.onProgress) {
+      callbacks.onProgress({phase: 'clearing', completed: completed, total: total});
+    }
     if (disposer || roots.length) {
       requestAnimationFrame(frame);
       return;
@@ -719,6 +729,27 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
   var sweepTimer = null;
   var boundsDirty = false;
   var lastResize = 0;
+  var lastProgress = -Infinity;
+  var lastProgressPhase = null;
+  var failures = 0;
+  var reportProgress = function(script, paused) {
+    if (!callbacks.onProgress) return;
+    var t = now();
+    var phase = !script ? (failures ? 'error' : 'idle') :
+        paused ? 'paused' : script.phase === -1 ? 'building' :
+        script.phase === 0 ? 'drawing' : script.phase === 1 ? 'layout' : 'finishing';
+    if (script && phase === lastProgressPhase && t - lastProgress < 100) return;
+    lastProgress = t;
+    lastProgressPhase = phase;
+    callbacks.onProgress({
+      phase: phase,
+      completed: !script ? 0 : script.phase === -1 ?
+          (script.builder ? script.builder.blocks.length : 0) :
+          script.phase === 2 ? script.blocks.length : script.blocks.length - script.blockIndex - 1,
+      total: script ? (script.blocks ? script.blocks.length : script.estimate) : 0,
+      failures: failures
+    });
+  };
 
   var now = function() {
     return (typeof performance != 'undefined' && performance.now) ?
@@ -773,6 +804,7 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
   // A script whose blocks the user deleted, or that is no longer a top level
   // block, is no longer ours to manage.
   var dropScript = function(script) {
+    script.failed = true;
     removePlaceholder(script);
     var index = scripts.indexOf(script);
     if (index !== -1) {
@@ -987,6 +1019,11 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
         if (!materializeScript(script)) return;
       } catch (e) {
         console.warn('Deferred block materialization failed.', e);
+        failures++;
+        if (script.builder && script.builder.root) {
+          var disposer = Blockly.Xml.createBlockDisposer_(script.builder.root);
+          while (!disposer.step()) {}
+        }
         dropScript(script);
         return;
       }
@@ -1021,6 +1058,7 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
       }
     } catch (e) {
       console.warn('Deferred block rendering failed.', e);
+      failures++;
     }
     if (script.phase === 2) {
       removePlaceholder(script);
@@ -1047,9 +1085,16 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
         (Blockly.WidgetDiv && Blockly.WidgetDiv.isVisible())) {
       // Materializing blocks mid-drag would move connections out from under
       // the drag. Panning the workspace is fine, so only block drags pause.
+      var waiting = pickScript(getViewport(), Infinity);
+      reportProgress(waiting && waiting.script, true);
       wake();
       return;
     }
+    if (!cacheOpen) {
+      cacheOpen = true;
+      Blockly.Field.startCache();
+    }
+    workspace.deferredRenderActive = true;
     var panning = !!(gesture && gesture.isDraggingWorkspace_);
     var disposalDeadline = now() + Blockly.Xml.DEFERRED_RENDER_BACKGROUND_BUDGET_MS;
     for (var u = 0; u < scripts.length; u++) {
@@ -1064,10 +1109,11 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     var viewport = getViewport();
     var maxDist = viewport ? loadDistance(viewport) : Infinity;
     var pick = pickScript(viewport, maxDist);
-    var deadline = now() + Blockly.Xml.DEFERRED_RENDER_BUDGET_MS;
+    var deadline = now() + (panning ? Blockly.Xml.DEFERRED_RENDER_BACKGROUND_BUDGET_MS :
+        Blockly.Xml.DEFERRED_RENDER_BUDGET_MS);
     while (pick && now() < deadline) {
       stepScript(pick.script);
-      if (pick.script.loaded || !pick.script.topBlock) {
+      if (pick.script.loaded || pick.script.failed) {
         pick = pickScript(viewport, maxDist);
       }
     }
@@ -1084,6 +1130,7 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
       }
     }
     if (pick) {
+      reportProgress(pick.script, false);
       wake();
       return;
     }
@@ -1092,6 +1139,7 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
 
   // Nothing near the viewport is waiting to load.
   settle = function() {
+    reportProgress(null, false);
     workspace.deferredRenderActive = false;
     if (workspace.rendered && workspace.setResizesEnabled) {
       workspace.setResizesEnabled(true);
@@ -1120,6 +1168,11 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
       return;
     }
     if (workspace.currentGesture_ || (Blockly.WidgetDiv && Blockly.WidgetDiv.isVisible())) return;
+    var cachedBlocks = 0;
+    for (var c = 0; c < scripts.length; c++) {
+      if (scripts[c].loaded) cachedBlocks += scripts[c].blocks.length;
+    }
+    if (cachedBlocks <= Blockly.Xml.VIRTUAL_CACHE_BLOCKS) return;
     var viewport = getViewport();
     if (!viewport) {
       return;
@@ -1156,9 +1209,10 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
         script.lastNear = t;
         continue;
       }
+      cachedBlocks -= script.blocks.length;
       unloadScript(script);
       changed = true;
-      if (now() >= deadline) break;
+      if (cachedBlocks <= Blockly.Xml.VIRTUAL_CACHE_BLOCKS || now() >= deadline) break;
     }
     if (changed) {
       updateBounds();
@@ -1285,7 +1339,7 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
           continue;
         }
         var guard = 0;
-        while (!script.loaded && guard++ < 1e7) {
+        while (!script.loaded && !script.failed && guard++ < 1e7) {
           stepScript(script);
           if (!script.topBlock && script.phase === -1 && !script.desc && !script.xmlNode) {
             break;  // dropped
