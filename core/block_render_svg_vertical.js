@@ -676,8 +676,9 @@ Blockly.BlockSvg.prototype.render = function(opt_bubble) {
   }
 
   if (opt_bubble !== false) {
-    // Render all blocks above this one (propagate a reflow).
-    var parentBlock = this.getParent();
+    // Previous statements do not depend on this block's geometry.
+    // Reflow the enclosing input directly, avoiding an entire stack per keystroke.
+    var parentBlock = this.getSurroundParent();
     if (parentBlock) {
       parentBlock.render(true);
     } else {

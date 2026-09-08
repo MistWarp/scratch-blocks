@@ -645,6 +645,7 @@ Blockly.Procedures.createProcedureCallbackFactory_ = function(workspace) {
  * @private
  */
 Blockly.Procedures.editProcedureCallback_ = function(block) {
+  if (!block || !block.workspace) return;
   // Edit can come from one of three block types (call, define, prototype)
   // Normalize by setting the block to the prototype block for the procedure.
   if (block.type == Blockly.PROCEDURES_DEFINITION_BLOCK_TYPE) {
@@ -660,7 +661,7 @@ Blockly.Procedures.editProcedureCallback_ = function(block) {
     }
     var innerBlock = conn.targetBlock();
     if (!innerBlock ||
-        !innerBlock.type == Blockly.PROCEDURES_PROTOTYPE_BLOCK_TYPE) {
+        innerBlock.type != Blockly.PROCEDURES_PROTOTYPE_BLOCK_TYPE) {
       alert('Bad inner block'); // TODO: Decide what to do about this.
       return;
     }
@@ -673,6 +674,8 @@ Blockly.Procedures.editProcedureCallback_ = function(block) {
     block = Blockly.Procedures.getPrototypeBlock(
         block.getProcCode(), workspaceToSearch);
   }
+  // Calls may outlive their definition, including while a context menu is open.
+  if (!block || !block.workspace) return;
   // Block now refers to the procedure prototype block, it is safe to proceed.
   Blockly.Procedures.externalProcedureDefCallback(
       block.mutationToDom(),

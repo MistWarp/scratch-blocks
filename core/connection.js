@@ -153,7 +153,8 @@ Blockly.Connection.prototype.connect_ = function(childConnection) {
     isSurroundingC = true;
   }
 
-  if (Blockly.Events.isEnabled() && !childBlock.isInsertionMarker()) {
+  if (Blockly.Events.isEnabled() && !childBlock.isInsertionMarker() &&
+      childBlock.workspace.procedureReturnsWillChange) {
     childBlock.workspace.procedureReturnsWillChange();
   }
 
@@ -600,7 +601,8 @@ Blockly.Connection.prototype.disconnect = function() {
  */
 Blockly.Connection.prototype.disconnectInternal_ = function(parentBlock,
     childBlock) {
-  if (Blockly.Events.isEnabled() && !childBlock.isInsertionMarker()) {
+  if (Blockly.Events.isEnabled() && !childBlock.isInsertionMarker() &&
+      childBlock.workspace.procedureReturnsWillChange) {
     childBlock.workspace.procedureReturnsWillChange();
   }
 

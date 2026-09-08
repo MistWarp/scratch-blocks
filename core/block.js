@@ -599,12 +599,14 @@ Blockly.Block.prototype.setParent = function(newParent) {
  * @return {!Array.<!Blockly.Block>} Flattened array of blocks.
  */
 Blockly.Block.prototype.getDescendants = function(ordered, opt_ignoreShadows) {
-  var blocks = [this];
-  var childBlocks = this.getChildren(ordered);
-  for (var child, i = 0; child = childBlocks[i]; i++) {
-    if (!opt_ignoreShadows || !child.isShadow_) {
-      blocks.push.apply(
-          blocks, child.getDescendants(ordered, opt_ignoreShadows));
+  var blocks = [];
+  var pending = [this];
+  while (pending.length) {
+    var block = pending.pop();
+    blocks.push(block);
+    var children = block.getChildren(ordered);
+    for (var i = children.length - 1; i >= 0; i--) {
+      if (!opt_ignoreShadows || !children[i].isShadow_) pending.push(children[i]);
     }
   }
   return blocks;

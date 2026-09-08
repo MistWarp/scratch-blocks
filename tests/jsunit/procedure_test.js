@@ -71,6 +71,25 @@ function procedureTest_tearDown() {
   workspace.dispose();
 }
 
+function test_editProcedure_missingDefinition() {
+  procedureTest_setUp();
+  var originalCallback = Blockly.Procedures.externalProcedureDefCallback;
+  try {
+    var call = workspace.newBlock(Blockly.PROCEDURES_CALL_BLOCK_TYPE);
+    call.procCode_ = 'deleted procedure';
+    Blockly.Procedures.externalProcedureDefCallback = function() {
+      fail('An orphan call must not open the procedure editor');
+    };
+    Blockly.Procedures.editProcedureCallback_(call);
+    call.dispose();
+    Blockly.Procedures.editProcedureCallback_(call);
+    Blockly.Procedures.editProcedureCallback_(null);
+  } finally {
+    Blockly.Procedures.externalProcedureDefCallback = originalCallback;
+    procedureTest_tearDown();
+  }
+}
+
 function test_findCallers_simple_oneCaller() {
   var xml = '<xml xmlns="http://www.w3.org/1999/xhtml">' +
     '<variables></variables>' +

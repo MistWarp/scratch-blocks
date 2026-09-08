@@ -360,6 +360,7 @@ Blockly.FieldTextInput.prototype.unbindEvents_ = function(htmlInput) {
 Blockly.FieldTextInput.prototype.onHtmlInputKeyDown_ = function(e) {
   var htmlInput = Blockly.FieldTextInput.htmlInput_;
   var tabKey = 9, enterKey = 13, escKey = 27;
+  if (e.isComposing || e.keyCode == 229) return;
   if (e.keyCode == enterKey) {
     Blockly.WidgetDiv.hide();
     Blockly.DropDownDiv.hideWithoutAnimation();
@@ -437,15 +438,12 @@ Blockly.FieldTextInput.prototype.onHtmlInputChange_ = function(e) {
   var htmlInput = Blockly.FieldTextInput.htmlInput_;
   // Update source block.
   var text = htmlInput.value;
-  if (text !== htmlInput.oldValue_) {
-    htmlInput.oldValue_ = text;
-    this.setText(text);
-    this.validate_();
-  } else if (goog.userAgent.WEBKIT) {
-    // Cursor key.  Render the source block to show the caret moving.
-    // Chrome only (version 26, OS X).
-    this.sourceBlock_.render();
-  }
+  // Keypress, input and keyup can describe the same edit. Cursor movement
+  // changes the native caret, not the SVG block geometry.
+  if (text === htmlInput.oldValue_) return;
+  htmlInput.oldValue_ = text;
+  this.setText(text);
+  this.validate_();
   this.resizeEditor_();
 };
 
