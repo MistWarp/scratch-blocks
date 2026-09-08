@@ -208,3 +208,97 @@ function test_deferredTargetedLoadingUsesCurrentParentDescriptions() {
     assertEquals('updated', ws.getBlockById('far').getFieldValue('TEXT'));
   });
 }
+
+function test_descriptionBuilderYieldsWithinOneLargeStack() {
+  deferredXmlTest(function(ws) {
+    var ctx = {blocks: {}, comments: {}};
+    for (var i = 0; i < 300; i++) {
+      ctx.blocks['b' + i] = {id: 'b' + i, opcode: 'deferred_test', inputs: {},
+        fields: {TEXT: {name: 'TEXT', value: String(i)}}, next: i < 299 ? 'b' + (i + 1) : null};
+    }
+    var builder = Blockly.Xml.createDescBlockBuilder_(ctx.blocks.b0, ctx, ws, true);
+    assertFalse(builder.step());
+    assertEquals('One step creates one block, not the whole stack', 1, ws.getAllBlocks().length);
+    while (!builder.step()) {}
+    assertEquals(300, builder.root.getDescendants(false).length);
+    assertEquals('299', ws.getBlockById('b299').getFieldValue('TEXT'));
+    var disposer = Blockly.Xml.createBlockDisposer_(builder.root);
+    assertFalse(disposer.step());
+    assertEquals('One disposal step removes one leaf', 299, ws.getAllBlocks().length);
+    while (!disposer.step()) {}
+    assertEquals(0, ws.getAllBlocks().length);
+    assertTrue('Disposal restores event recording', Blockly.Events.recordUndo);
+  });
+}
+
+function test_asyncWorkspaceClearCancellationUsesNewestTarget() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    for (var i = 0; i < 120; i++) ws.newBlock('deferred_test', 'old' + i);
+    var obsolete = 0;
+    var first = Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(
+        Blockly.Xml.textToDom('<xml/>'), ws, {onDone: function() { obsolete++; }}, ctx);
+    assertEquals('Clearing yields before disposal', 120, ws.getAllBlocks().length);
+    first.cancel();
+    var replacement = {blocks: {newest: {id: 'newest', opcode: 'deferred_test',
+      topLevel: true, x: 10, y: 10, fields: {}, inputs: {}}}, scripts: ['newest'], comments: {}};
+    Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {}, replacement);
+    flush();
+    assertEquals(0, obsolete);
+    assertEquals(1, ws.getAllBlocks().length);
+    assertNotNull(ws.getBlockById('newest'));
+    assertNull(ws.getBlockById('near'));
+  });
+}
+
+function test_unchangedTextInputDoesNotRenderOrResize() {
+  var oldInput = Blockly.FieldTextInput.htmlInput_;
+  var input = {value: 'unchanged', oldValue_: 'unchanged'};
+  var renders = 0;
+  var resizes = 0;
+  Blockly.FieldTextInput.htmlInput_ = input;
+  try {
+    Blockly.FieldTextInput.prototype.onHtmlInputChange_.call({
+      sourceBlock_: {render: function() { renders++; }},
+      resizeEditor_: function() { resizes++; }
+    }, {type: 'keyup'});
+    assertEquals(0, renders);
+    assertEquals(0, resizes);
+  } finally {
+    Blockly.FieldTextInput.htmlInput_ = oldInput;
+  }
+}
+
+function test_textEditReflowsEnclosingInputWithoutRenderingPreviousStatements() {
+  deferredXmlTest(function(ws, ctx) {
+    Blockly.Blocks.deferred_surround = {init: function() {
+      this.appendStatementInput('BODY');
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour('#123456');
+    }};
+    var originalRender = Blockly.BlockSvg.prototype.render;
+    try {
+      ctx.blocks = {outer: {id: 'outer', opcode: 'deferred_surround', inputs: {
+        BODY: {name: 'BODY', block: 'edit0'}}, fields: {}}};
+      ctx.scripts = ['outer'];
+      for (var i = 0; i < 100; i++) {
+        ctx.blocks['edit' + i] = {id: 'edit' + i, opcode: 'deferred_test',
+          inputs: {}, fields: {TEXT: {name: 'TEXT', value: 'short'}},
+          next: i < 99 ? 'edit' + (i + 1) : null};
+      }
+      Blockly.Xml.descsToWorkspace_(ctx, ws);
+      var width = ws.getBlockById('outer').width;
+      var renders = 0;
+      Blockly.BlockSvg.prototype.render = function(bubble) {
+        renders++;
+        return originalRender.call(this, bubble);
+      };
+      ws.getBlockById('edit99').setFieldValue('a substantially wider input value', 'TEXT');
+      assertEquals('Only the edited block and enclosing block reflow', 2, renders);
+      assertTrue('The enclosing statement still grows', ws.getBlockById('outer').width > width);
+    } finally {
+      Blockly.BlockSvg.prototype.render = originalRender;
+      delete Blockly.Blocks.deferred_surround;
+    }
+  });
+}

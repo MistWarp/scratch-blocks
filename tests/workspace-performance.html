@@ -1,0 +1,95 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Workspace performance check</title>
+<script>
+  document.write('<script src="' + (new URLSearchParams(location.search).has('baseline') ?
+    '../node_modules/.cache/mistwarp-performance/baseline.js' : '../blockly_compressed_vertical.js') + '"><\/script>');
+</script>
+<script src="../blocks_compressed.js"></script>
+<script src="../blocks_compressed_vertical.js"></script>
+<script src="../msg/messages.js"></script>
+<button id="run">Run 1,200-block load and unload</button>
+<pre id="result">Ready</pre>
+<div id="workspace" style="width:800px;height:600px"></div>
+<script>
+  document.getElementById('run').onclick = async function () {
+    this.disabled = true;
+    const result = document.getElementById('result');
+    const workspace = Blockly.inject('workspace', {scrollbars:true});
+    const view = {viewLeft:0,viewTop:0,viewWidth:800,viewHeight:600};
+    workspace.getMetrics = () => view;
+    const ctx = {blocks:{},scripts:['b0'],comments:{}};
+    for (let i=0;i<600;i++) {
+      ctx.blocks['b'+i]={id:'b'+i,opcode:'motion_movesteps',topLevel:i===0,parent:i?'b'+(i-1):null,
+        next:i<599?'b'+(i+1):null,x:10,y:10,fields:{},
+        inputs:{STEPS:{name:'STEPS',block:'n'+i,shadow:'n'+i}}};
+      ctx.blocks['n'+i]={id:'n'+i,opcode:'math_number',shadow:true,parent:'b'+i,
+        inputs:{},fields:{NUM:{name:'NUM',value:String(i)}}};
+    }
+    const unloadDelay = Blockly.Xml.VIRTUAL_UNLOAD_DELAY_MS;
+    const raf = window.requestAnimationFrame;
+    const interval = window.setInterval;
+    const samples = [];
+    const background = [];
+    window.requestAnimationFrame = fn => raf.call(window, time => {
+      const start=performance.now();
+      try { fn(time); } finally { samples.push(performance.now()-start); }
+    });
+    window.setInterval = (fn,delay) => interval.call(window, () => {
+      const start=performance.now();
+      try { fn(); } finally { background.push(performance.now()-start); }
+    },delay);
+    const timings = {};
+    let unloading = false;
+    const instrumented = [[Blockly.Xml, 'createBlockDisposer_'],
+      [workspace, 'resizeContents'], [Blockly.BlockSvg.prototype, 'getRelativeToSurfaceXY'],
+      [Blockly.BlockSvg.prototype, 'getHeightWidth']].filter(([obj,key])=>typeof obj[key]==='function');
+    const originals = instrumented.map(([obj,key])=>obj[key]);
+    instrumented.forEach(([obj,key],i)=>obj[key]=function(...args) {
+      const started=performance.now();
+      try { return originals[i].apply(this,args); }
+      finally { if(unloading) timings[key]=(timings[key]||0)+performance.now()-started; }
+    });
+    const start = performance.now();
+    let returned;
+    try {
+      await new Promise(resolve => {
+        Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'),workspace,{onDone:resolve},ctx);
+        returned=performance.now()-start;
+      });
+      const loadMs=performance.now()-start;
+      const loadFrames=samples.slice();
+      const edits=[];
+      for (let i=0;i<10;i++) {
+        await new Promise(resolve=>raf.call(window,resolve));
+        const editStart=performance.now();
+        workspace.getBlockById('n599').setFieldValue(String(100000+i),'NUM');
+        edits.push(performance.now()-editStart);
+      }
+      samples.length=0;
+      unloading=true;
+      Blockly.Xml.VIRTUAL_UNLOAD_DELAY_MS=0;
+      view.viewLeft=100000;
+      workspace.wakeVirtualScripts_();
+      const unloadStart=performance.now();
+      while (workspace.getAllBlocks().length && performance.now()-unloadStart<15000) {
+        await new Promise(resolve=>setTimeout(resolve,20));
+      }
+      const unloadMs=performance.now()-unloadStart;
+      result.textContent=JSON.stringify({loadMs,initialTaskMs:returned,
+        maxLoadFrameMs:Math.max(0,...loadFrames),loadFrames:loadFrames.length,
+        maxInputEditMs:Math.max(...edits),
+        maxUnloadFrameMs:Math.max(0,...samples),maxSweepMs:Math.max(0,...background),
+        blocksAfterUnload:workspace.getAllBlocks().length,unloadMs,timings},null,2);
+    } catch(error) {
+      result.textContent=error.stack;
+    } finally {
+      instrumented.forEach(([obj,key],i)=>obj[key]=originals[i]);
+      workspace.dispose();
+      Blockly.Xml.VIRTUAL_UNLOAD_DELAY_MS=unloadDelay;
+      window.requestAnimationFrame=raf;
+      window.setInterval=interval;
+      this.disabled=false;
+    }
+  };
+</script>
