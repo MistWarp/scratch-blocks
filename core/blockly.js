@@ -402,7 +402,22 @@ Blockly.prompt = function(message, defaultValue, callback, _opt_title,
     _opt_varType) {
   // opt_title and opt_varType are unused because we only need them to pass
   // information to the scratch-gui, which overwrites this function
-  callback(window.prompt(message, defaultValue));
+  let result;
+  try {
+    result = window.prompt(message, defaultValue);
+  } catch (e) {
+    // Electron does not support native prompt(): "prompt() is and will not
+    // be supported." Treat as cancelled instead of throwing through
+    // goog.ui.MenuItem callbacks.
+    callback(null);
+    return;
+  }
+  if (result && typeof result.then === 'function') {
+    // Desktop override returns a Promise<string|null>.
+    result.then(callback, () => callback(null));
+  } else {
+    callback(result);
+  }
 };
 
 /**
