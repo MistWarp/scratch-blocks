@@ -24,6 +24,21 @@
  */
 'use strict';
 
+function test_textAndNumberDropdownRecycling() {
+  var types = [Blockly.FieldTextDropdown, Blockly.FieldNumberDropdown];
+  types.forEach(function(FieldType) {
+    var options = [['one', '1']];
+    var field = new FieldType('1', options);
+    var block = {inputList: [{fieldRow: [field]}]};
+    assertFalse(field.isOptionListDynamic());
+    assertTrue(Blockly.scratchBlocksUtils.blockIsRecyclable(block));
+    field.menuGenerator_ = function() { return options; };
+    assertTrue(field.isOptionListDynamic());
+    assertFalse(Blockly.scratchBlocksUtils.blockIsRecyclable(block));
+    field.dispose();
+  });
+}
+
 function test_field_isEditable_simple() {
   var field = new Blockly.Field("Dummy text");
   // EDITABLE is true by default, but without a source block a field can't be

@@ -143,6 +143,12 @@ Blockly.FieldTextDropdown.prototype.showEditor_ = function() {
 Blockly.FieldTextDropdown.prototype.getOptions_ = Blockly.FieldDropdown.prototype.getOptions_;
 
 /**
+ * @return {boolean} Whether the dropdown generates its options dynamically.
+ */
+Blockly.FieldTextDropdown.prototype.isOptionListDynamic =
+    Blockly.FieldDropdown.prototype.isOptionListDynamic;
+
+/**
  * Position a drop-down arrow at the appropriate location at render-time.
  * See: Blockly.FieldDropDown.prototype.positionArrow.
  * @param {number} x X position the arrow is being rendered at, in px.
