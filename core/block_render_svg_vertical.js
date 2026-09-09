@@ -672,7 +672,7 @@ Blockly.BlockSvg.prototype.render = function(opt_bubble, opt_deferConnections) {
   // Position the Scratch Block Comment Icon at the end of the block
   if (scratchCommentIcon) {
     var iconX = this.RTL ? -inputRows.rightEdge : inputRows.rightEdge;
-    var inputMarginY = inputRows[0].height / 2;
+    var inputMarginY = (inputRows.length ? inputRows[0].height : this.height) / 2;
     scratchCommentIcon.renderIcon(iconX, inputMarginY);
   }
 

@@ -19,6 +19,26 @@
  */
 'use strict';
 
+function test_commentOnBlockWithNoInputRows() {
+  var icon = Object.create(Blockly.ScratchBlockComment.prototype);
+  var position;
+  icon.renderIcon = function(x, y) { position = [x, y]; };
+  var rows = [];
+  rows.rightEdge = 40;
+  var noop = function() {};
+  var emptyBlock = {
+    height: 32,
+    getIcons: function() { return [icon]; },
+    renderCompute_: function() { return rows; },
+    renderDraw_: noop,
+    renderMoveConnections_: noop,
+    renderClassify_: noop,
+    updateIntersectionObserver: noop
+  };
+  Blockly.BlockSvg.prototype.render.call(emptyBlock, false);
+  assertArrayEquals([40, 16], position);
+}
+
 goog.require('goog.testing');
 
 var block;
