@@ -1775,8 +1775,9 @@ Blockly.Xml.domToBlockHeadless_ = function(xmlBlock, workspace) {
           } else if (blockChild.previousConnection) {
             input.connection.connect(blockChild.previousConnection);
           } else {
-            goog.asserts.fail(
-                'Child block does not have output or previous statement.');
+            // Keep malformed or changed extension blocks as top-level blocks so
+            // one incompatible input does not prevent the workspace from loading.
+            console.warn('Child block does not have output or previous statement.');
           }
         }
         break;

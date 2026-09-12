@@ -50,7 +50,7 @@ Blockly.ScratchBlocks.OperatorUtils.setArrowsHidden = function(hidden) {
 };
 
 Blockly.FieldOperatorButton = function(iconSrc, handlerName) {
-  Blockly.FieldOperatorButton.superClass_.constructor.call(
+  Blockly.FieldImage.call(
       this, iconSrc, 12, 18, handlerName === 'plus' ? '+' : '-');
   this.handlerName_ = handlerName;
 };
@@ -58,7 +58,7 @@ goog.inherits(Blockly.FieldOperatorButton, Blockly.FieldImage);
 
 Blockly.FieldOperatorButton.prototype.init = function() {
   if (this.fieldGroup_) return;
-  Blockly.FieldOperatorButton.superClass_.init.call(this);
+  Blockly.FieldImage.prototype.init.call(this);
   this.imageElement_.style.cursor = 'pointer';
   this.mouseDownWrapper_ = Blockly.bindEventWithChecks_(
       this.imageElement_, 'mousedown', this, this.onMouseDown_);
@@ -69,7 +69,7 @@ Blockly.FieldOperatorButton.prototype.dispose = function() {
     Blockly.unbindEvent_(this.mouseDownWrapper_);
     this.mouseDownWrapper_ = null;
   }
-  Blockly.FieldOperatorButton.superClass_.dispose.call(this);
+  Blockly.FieldImage.prototype.dispose.call(this);
 };
 
 Blockly.FieldOperatorButton.prototype.onMouseDown_ = function(e) {
