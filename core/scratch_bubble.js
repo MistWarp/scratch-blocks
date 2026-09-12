@@ -445,6 +445,8 @@ Blockly.ScratchBubble.prototype.resizeMouseDown_ = function(e) {
 Blockly.ScratchBubble.prototype.resizeMouseUp_ = function(_e) {
   var oldHW = this.resizeStartSize_;
   this.resizeStartSize_ = null;
+  if (!oldHW || !this.workspace_) return;
+  this.workspace_.setResizesEnabled(true);
   if (this.width_ == oldHW.width && this.height_ == oldHW.height) {
     return;
   }
