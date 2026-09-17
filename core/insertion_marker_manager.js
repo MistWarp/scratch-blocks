@@ -656,6 +656,9 @@ Blockly.InsertionMarkerManager.prototype.connectMarker_ = function() {
   var isLastInStack = this.lastOnStack_ && local == this.lastOnStack_;
   var imBlock = isLastInStack ? this.lastMarker_ : this.firstMarker_;
   var imConn = imBlock.getMatchingConnection(local.sourceBlock_, local);
+  if (!imConn) {
+    return;
+  }
 
   goog.asserts.assert(imConn != this.markerConnection_,
       'Made it to connectMarker_ even though the marker isn\'t changing');
