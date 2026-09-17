@@ -51,7 +51,8 @@ Blockly.inject = function(container, opt_options) {
         document.querySelector(container);
   }
   // Verify that the container is in document.
-  if (!goog.dom.contains(document, container)) {
+  var containerDocument = (container && container.ownerDocument) || document;
+  if (!goog.dom.contains(containerDocument, container)) {
     throw 'Error: container is not in current document.';
   }
   var options = new Blockly.Options(opt_options || {});

@@ -755,7 +755,7 @@ Blockly.Block.prototype.getMatchingConnection = function(otherBlock, conn) {
   var connections = this.getConnections_(true);
   var otherConnections = otherBlock.getConnections_(true);
   if (connections.length != otherConnections.length) {
-    throw "Connection lists did not match in length.";
+    return null;
   }
   for (var i = 0; i < otherConnections.length; i++) {
     if (otherConnections[i] == conn) {

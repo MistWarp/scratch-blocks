@@ -548,13 +548,21 @@ Blockly.Procedures.getDefineBlock = function(procCode, workspace) {
   var blocks = workspace.getTopBlocks(false);
   for (var i = 0; i < blocks.length; i++) {
     if (blocks[i].type == Blockly.PROCEDURES_DEFINITION_BLOCK_TYPE) {
-      var prototypeBlock = blocks[i].getInput('custom_block').connection.targetBlock();
-      if (prototypeBlock.getProcCode && prototypeBlock.getProcCode() == procCode) {
+      if (Blockly.Procedures.getDefinitionProcCode_(blocks[i]) == procCode) {
         return blocks[i];
       }
     }
   }
   return null;
+};
+
+Blockly.Procedures.getDefinitionProcCode_ = function(defineBlock) {
+  var input = defineBlock.getInput('custom_block');
+  var prototypeBlock = input && input.connection && input.connection.targetBlock();
+  if (!prototypeBlock || !prototypeBlock.getProcCode) {
+    return null;
+  }
+  return prototypeBlock.getProcCode();
 };
 
 /**
@@ -871,10 +879,10 @@ Blockly.Procedures.getAllProcedureReturnTypes = function(workspace) {
   for (var i = 0; i < blocks.length; i++) {
     var block = blocks[i];
     if (block.type == Blockly.PROCEDURES_DEFINITION_BLOCK_TYPE && !block.isInsertionMarker()) {
-      var procCode = block.getInput('custom_block').connection.targetBlock().getProcCode();
+      var procCode = Blockly.Procedures.getDefinitionProcCode_(block);
       // To match behavior of getDefineBlock, if multiple instances of this procedure are
       // defined, only use the first one.
-      if (!Object.prototype.hasOwnProperty.call(result, procCode)) {
+      if (procCode !== null && !Object.prototype.hasOwnProperty.call(result, procCode)) {
         result[procCode] = Blockly.Procedures.getBlockReturnType(block);
       }
     }
