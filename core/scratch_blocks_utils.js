@@ -160,9 +160,9 @@ Blockly.scratchBlocksUtils.duplicateAndDragCallback = function(oldBlock, event) 
     setTimeout(function() {
       var ws = oldBlock.workspace;
       var svgRootOld = oldBlock.getSvgRoot();
-      if (!svgRootOld) {
-        throw new Error('oldBlock is not rendered.');
-      }
+      // A target switch or a remote edit can dispose the block while the menu
+      // is open, or before this deferred callback runs.
+      if (!ws || !svgRootOld) return;
 
       // Create the new block by cloning the block in the flyout (via XML).
       var xml = Blockly.Xml.blockToDom(oldBlock);
