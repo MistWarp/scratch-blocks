@@ -279,11 +279,15 @@ Blockly.BlockDragSurfaceSvg.prototype.getCurrentBlock = function() {
  *     being moved to a different surface.
  */
 Blockly.BlockDragSurfaceSvg.prototype.clearAndHide = function(opt_newSurface) {
-  if (opt_newSurface) {
-    // appendChild removes the node from this.dragGroup_
-    opt_newSurface.appendChild(this.getCurrentBlock());
-  } else {
-    this.dragGroup_.removeChild(this.getCurrentBlock());
+  var currentBlock = this.getCurrentBlock();
+  // A block disposed mid-drag has already removed itself from the surface.
+  if (currentBlock) {
+    if (opt_newSurface) {
+      // appendChild removes the node from this.dragGroup_
+      opt_newSurface.appendChild(currentBlock);
+    } else {
+      this.dragGroup_.removeChild(currentBlock);
+    }
   }
   this.SVG_.style.display = 'none';
   goog.asserts.assert(
