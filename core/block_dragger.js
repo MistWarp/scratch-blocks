@@ -441,6 +441,36 @@ Blockly.BlockDragger.prototype.fireEndDragEvent_ = function(isOutside) {
 };
 
 /**
+ * Clean up a drag whose block was disposed by something other than this drag,
+ * such as a project load or a collaborator deleting it.
+ * @package
+ */
+Blockly.BlockDragger.prototype.abandonDrag = function() {
+  Blockly.BlockAnimations.disconnectUiStop();
+  var workspace = this.workspace_;
+  if (workspace && workspace.rendered) {
+    // The disposed block already left the drag surface. Hide the empty surface,
+    // which otherwise covers the workspace and swallows every click.
+    var surface = workspace.getBlockDragSurface();
+    if (surface) {
+      surface.clearAndHide();
+    }
+    workspace.setResizesEnabled(true);
+    var toolbox = workspace.getToolbox();
+    if (toolbox) {
+      toolbox.removeStyle('blocklyToolboxDelete');
+      toolbox.removeStyle('blocklyToolboxGrab');
+    }
+    // Tell listeners such as scratch-vm that the drag is over. A disposed block
+    // has no workspace, so route the event to the drag's workspace explicitly.
+    var event = new Blockly.Events.EndBlockDrag(this.draggingBlock_, false);
+    event.workspaceId = workspace.id;
+    Blockly.Events.fire(event);
+  }
+  Blockly.Events.setGroup(false);
+};
+
+/**
  * Fire a move event at the end of a block drag.
  * @private
  */

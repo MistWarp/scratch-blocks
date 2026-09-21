@@ -541,6 +541,9 @@ Blockly.Gesture.prototype.bindMouseEvents = function(e) {
  * @package
  */
 Blockly.Gesture.prototype.handleMove = function(e) {
+  if (this.abandonDisposedBlockDrag_()) {
+    return;
+  }
   var stopPropagation = true;
   this.updateFromEvent_(e);
   if (this.isDraggingWorkspace_) {
@@ -562,6 +565,24 @@ Blockly.Gesture.prototype.handleMove = function(e) {
 };
 
 /**
+ * End a block drag without touching the block if the block was disposed while
+ * it was being dragged. Blocks only cancel the gesture themselves when they are
+ * selected, so a workspace cleared by a project load can leave a drag running.
+ * @return {boolean} True if the drag was abandoned and the gesture disposed.
+ * @private
+ */
+Blockly.Gesture.prototype.abandonDisposedBlockDrag_ = function() {
+  if (!this.isDraggingBlock_ || !this.targetBlock_ || this.targetBlock_.workspace) {
+    return false;
+  }
+  this.isEnding_ = true;
+  Blockly.longStop_();
+  this.blockDragger_.abandonDrag();
+  this.dispose();
+  return true;
+};
+
+/**
  * Handle a mouse up or touch end event.
  * @param {!Event} e A mouse up or touch end event.
  * @package
@@ -570,7 +591,7 @@ Blockly.Gesture.prototype.handleUp = function(e) {
   this.updateFromEvent_(e);
   Blockly.longStop_();
 
-  if (this.isEnding_) {
+  if (this.isEnding_ || this.abandonDisposedBlockDrag_()) {
     return;
   }
   this.isEnding_ = true;
@@ -610,7 +631,7 @@ Blockly.Gesture.prototype.handleUp = function(e) {
 Blockly.Gesture.prototype.cancel = function() {
   // Disposing of a block cancels in-progress drags, but dragging to a delete
   // area disposes of a block and leads to recursive disposal. Break that cycle.
-  if (this.isEnding_) {
+  if (this.isEnding_ || this.abandonDisposedBlockDrag_()) {
     return;
   }
   this.isEnding_ = true;
