@@ -10,6 +10,7 @@ var UglifyJsPlugin = require('uglifyjs-webpack-plugin');
 
 
 module.exports = [{
+  name: 'dist',
   mode: process.env.NODE_ENV === 'production' ? 'production' : 'development',
   entry: {
     horizontal: './shim/horizontal.js',
@@ -28,6 +29,7 @@ module.exports = [{
     hints: false
   }
 }, {
+  name: 'web',
   mode: process.env.NODE_ENV === 'production' ? 'production' : 'development',
   entry: {
     horizontal: './shim/horizontal.js',
@@ -51,6 +53,7 @@ module.exports = [{
   plugins: []
 },
 {
+  name: 'gh-pages',
   mode: process.env.NODE_ENV === 'production' ? 'production' : 'development',
   entry: './shim/gh-pages.js',
   output: {
@@ -94,4 +97,8 @@ module.exports = [{
         to: 'playgrounds'
       }])
   ]
-}];
+}].filter(function (config) {
+  // The playground bundle copies the whole Closure library into gh-pages/, which the
+  // install-time `prepare` build has no use for. Only `npm run build:playground` wants it.
+  return config.name !== 'gh-pages' || process.env.BUILD_PLAYGROUND === '1';
+});
