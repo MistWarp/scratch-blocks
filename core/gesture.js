@@ -866,7 +866,7 @@ Blockly.Gesture.prototype.setStartBlock = function(block) {
  * @private
  */
 Blockly.Gesture.prototype.setTargetBlock_ = function(block) {
-  if (block.isShadow() && !this.shouldDuplicateOnDrag_) {
+  if (block.isShadow() && !this.shouldDuplicateOnDrag_ && block.getParent()) {
     this.setTargetBlock_(block.getParent());
   } else {
     this.targetBlock_ = block;
