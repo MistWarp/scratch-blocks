@@ -707,6 +707,9 @@ Blockly.Scrollbar.prototype.onMouseDownBar_ = function(e) {
     e.stopPropagation();
     return;
   }
+  if (this.workspace_.markUserScroll) {
+    this.workspace_.markUserScroll();
+  }
   var mouseXY = Blockly.utils.mouseToSvg(e, this.workspace_.getParentSvg(),
       this.workspace_.getInverseScreenCTM());
   var mouseLocation = this.horizontal_ ? mouseXY.x : mouseXY.y;
@@ -781,6 +784,9 @@ Blockly.Scrollbar.prototype.onMouseMoveHandle_ = function(e) {
   var currentMouse = this.horizontal_ ? e.clientX : e.clientY;
   var mouseDelta = currentMouse - this.startDragMouse_;
   var handlePosition = this.startDragHandle + mouseDelta;
+  if (this.workspace_.markUserScroll) {
+    this.workspace_.markUserScroll();
+  }
   // Position the bar.
   this.setHandlePosition(this.constrainHandle_(handlePosition));
   this.onScroll_();

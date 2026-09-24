@@ -710,16 +710,31 @@ Blockly.Frame.prototype.getMembers = function() {
  * script stacked below it, lies within the frame's expanded rectangle. When
  * frames overlap, the smallest one that contains the block wins, so that a
  * frame inside another frame keeps its own scripts.
+ * @param {Object=} opt_measured Top-level block measurements to reuse.
  * @return {!Array.<!Blockly.BlockSvg>} The blocks inside this frame.
  * @package
  */
-Blockly.Frame.prototype.getContainedBlocks = function() {
-  var frames = this.workspace.getTopFrames();
-  var blocks = this.workspace.getTopBlocks(false);
-  var contained = [];
+Blockly.Frame.prototype.getContainedBlocks = function(opt_measured) {
+  return this.getContainedBoxes_(opt_measured).blocks;
+};
+
+Blockly.Frame.measureTopBlocks_ = function(workspace) {
+  var blocks = workspace.getTopBlocks(false);
+  var boxes = [];
   for (var i = 0; i < blocks.length; i++) {
-    var block = blocks[i];
-    if (!this.containsPoint(block.getBoundingRectangle().topLeft)) {
+    boxes.push(blocks[i].getBoundingRectangle());
+  }
+  return {blocks: blocks, boxes: boxes};
+};
+
+Blockly.Frame.prototype.getContainedBoxes_ = function(opt_measured) {
+  var frames = this.workspace.getTopFrames();
+  var measured = opt_measured || Blockly.Frame.measureTopBlocks_(this.workspace);
+  var contained = [];
+  var containedBoxes = [];
+  for (var i = 0; i < measured.blocks.length; i++) {
+    var topLeft = measured.boxes[i].topLeft;
+    if (!this.containsPoint(topLeft)) {
       continue;
     }
     // Only the smallest frame containing the block owns it.
@@ -727,16 +742,17 @@ Blockly.Frame.prototype.getContainedBlocks = function() {
     for (var j = 0; j < frames.length; j++) {
       var other = frames[j];
       if (other != this &&
-          other.containsPoint(block.getBoundingRectangle().topLeft) &&
+          other.containsPoint(topLeft) &&
           other.area_() < smallest.area_()) {
         smallest = other;
       }
     }
     if (smallest == this) {
-      contained.push(block);
+      contained.push(measured.blocks[i]);
+      containedBoxes.push(measured.boxes[i]);
     }
   }
-  return contained;
+  return {blocks: contained, boxes: containedBoxes};
 };
 
 /**
@@ -763,22 +779,23 @@ Blockly.Frame.prototype.containsPoint = function(xy) {
 /**
  * Grow the frame so that every block inside it fits. Frames never shrink on
  * their own: the size the user dragged them to is a floor.
+ * @param {Object=} opt_measured Top-level block measurements to reuse.
  * @package
  */
-Blockly.Frame.prototype.growToFitBlocks = function() {
+Blockly.Frame.prototype.growToFitBlocks = function(opt_measured) {
   if (this.collapsed_ || this.dragMembers_) {
     return;
   }
-  var blocks = this.getContainedBlocks();
-  if (!blocks.length) {
+  var boxes = this.getContainedBoxes_(opt_measured).boxes;
+  if (!boxes.length) {
     return;
   }
 
   var pad = Blockly.Frame.PADDING;
   var right = this.xy_.x + this.width_;
   var bottom = this.xy_.y + this.height_;
-  for (var i = 0; i < blocks.length; i++) {
-    var box = blocks[i].getBoundingRectangle();
+  for (var i = 0; i < boxes.length; i++) {
+    var box = boxes[i];
     right = Math.max(right, box.bottomRight.x + pad);
     bottom = Math.max(bottom, box.bottomRight.y + pad);
   }
@@ -1184,15 +1201,20 @@ Blockly.Frame.onWorkspaceChange = function(workspace, event) {
       event.type != Blockly.Events.CHANGE) {
     return;
   }
+  if (!workspace.topFrames_.length) {
+    return;
+  }
   var frames = workspace.getTopFrames();
+  var measured = null;
   for (var i = 0; i < frames.length; i++) {
     var frame = frames[i];
     if (frame.isCollapsed()) {
       // A frame can be loaded already collapsed, and its blocks arrive after
       // it does, so keep hiding them as they turn up.
       frame.setMembersVisible_(false);
-    } else {
-      frame.growToFitBlocks();
+    } else if (!frame.dragMembers_) {
+      measured = measured || Blockly.Frame.measureTopBlocks_(workspace);
+      frame.growToFitBlocks(measured);
     }
   }
 };
