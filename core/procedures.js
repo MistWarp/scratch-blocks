@@ -164,7 +164,13 @@ Blockly.Procedures.deferredProcedureMutations_ = function(root) {
   for (var i = 0; i < scripts.length; i++) {
     var prototypeMutation = null;
     var hasReturn = false;
-    if (scripts[i].desc) {
+    if (scripts[i].procedure !== undefined) {
+      // The loader summarized this script when it measured it.
+      if (scripts[i].procedure) {
+        prototypeMutation = Blockly.Xml.mutationDescToDom_(scripts[i].procedure.mutation);
+        hasReturn = scripts[i].procedure.hasReturn;
+      }
+    } else if (scripts[i].desc) {
       Blockly.Xml.forEachDescBlock(scripts[i].desc, scripts[i].ctx, function(d) {
         if (d.opcode == Blockly.PROCEDURES_PROTOTYPE_BLOCK_TYPE && d.mutation) {
           prototypeMutation = Blockly.Xml.mutationDescToDom_(d.mutation);
