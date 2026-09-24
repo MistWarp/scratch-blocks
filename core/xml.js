@@ -471,8 +471,28 @@ Blockly.Xml.createBlockDisposer_ = function(topBlock) {
   }};
 };
 
+/**
+ * The most script work to do in one animation frame. The loader backs off
+ * from this towards DEFERRED_RENDER_MIN_BUDGET_MS while frames run long.
+ */
 Blockly.Xml.DEFERRED_RENDER_BUDGET_MS = 8;
+Blockly.Xml.DEFERRED_RENDER_MIN_BUDGET_MS = 2;
 Blockly.Xml.DEFERRED_RENDER_BACKGROUND_BUDGET_MS = 2;
+
+/**
+ * How far into a frame the loader may keep working, measured from the frame's
+ * timestamp rather than from when the loader was called. Input handlers and
+ * other animation callbacks that ran earlier in the frame eat into this, so a
+ * busy frame gets less loading, not a longer frame.
+ */
+Blockly.Xml.DEFERRED_FRAME_TARGET_MS = 12;
+
+/**
+ * A gap between consecutive loader frames longer than this means the browser
+ * needed the rest of the frame for style, layout and paint of what was just
+ * added, so the budget shrinks.
+ */
+Blockly.Xml.DEFERRED_SLOW_FRAME_MS = 24;
 Blockly.Xml.DEFERRED_SCRIPT_WIDTH_ESTIMATE = 300;
 Blockly.Xml.DEFERRED_BLOCK_HEIGHT_ESTIMATE = 48;
 
@@ -690,6 +710,7 @@ Blockly.Xml.domToWorkspaceDeferred = function(xml, workspace, opt_callbacks,
           estimate: size.count,
           visible: size.visible,
           rows: size.rows,
+          procedure: size.procedure,
           phase: -1,
           topBlock: null,
           blocks: null,
@@ -719,6 +740,12 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     workspace.cancelDeferredRender();
   }
   var canvas = workspace.getCanvas();
+  // Scripts are built and drawn in this detached group and only join the
+  // canvas once complete. Every DOM change inside the live canvas costs the
+  // browser a style, layout and paint pass over the workspace, and a script
+  // takes hundreds of steps to draw, so staging turns hundreds of passes into
+  // one per script.
+  var staging = canvas ? Blockly.utils.createSvgElement('g', {}, null) : null;
   var phWidth = Blockly.Xml.DEFERRED_SCRIPT_WIDTH_ESTIMATE;
   var cancelled = false;
   var scheduled = false;
@@ -728,6 +755,11 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
   var cacheOpen = true;
   var sweepTimer = null;
   var boundsDirty = false;
+  var settleWork = true;
+  var budget = Blockly.Xml.DEFERRED_RENDER_BUDGET_MS;
+  var lastFrameTime = 0;
+  var busyLastFrame = false;
+  var lastViewportKey = '';
   var lastResize = 0;
   var lastProgress = -Infinity;
   var lastProgressPhase = null;
@@ -741,6 +773,7 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
         paused ? 'paused' : script.phase === -1 ? 'building' :
         script.phase === 0 ? 'drawing' : script.phase === 1 ? 'layout' : 'finishing';
     if (script && phase === lastProgressPhase && t - lastProgress < 100) return;
+    if (!script && phase === lastProgressPhase) return;
     lastProgress = t;
     lastProgressPhase = phase;
     callbacks.onProgress({
@@ -759,10 +792,20 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     return (typeof performance != 'undefined' && performance.now) ?
         performance.now() : Date.now();
   };
-  var scriptHeight = function(script) {
-    return script.rows * Blockly.Xml.DEFERRED_BLOCK_HEIGHT_ESTIMATE;
+  // The footprint a script takes up while it is not rendered. Scripts that
+  // have been rendered before keep their measured size, so unloading and
+  // reloading them never moves the scrollable area.
+  var placeholderSize = function(script) {
+    return {
+      width: script.width || phWidth,
+      height: script.height || script.rows * Blockly.Xml.DEFERRED_BLOCK_HEIGHT_ESTIMATE
+    };
   };
-  var updateBounds = function() {
+  var markChanged = function() {
+    boundsDirty = true;
+    settleWork = true;
+  };
+  var updateBounds = function(opt_exact) {
     boundsDirty = false;
     var bounds = null;
     for (var i = 0; i < scripts.length; i++) {
@@ -770,16 +813,32 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
       if (script.loaded || !script.hasPosition) {
         continue;
       }
-      var left = workspace.RTL ? script.x - phWidth : script.x;
-      var bottom = script.y + scriptHeight(script);
+      var size = placeholderSize(script);
+      var left = workspace.RTL ? script.x - size.width : script.x;
+      var right = left + size.width;
+      var bottom = script.y + size.height;
       if (!bounds) {
-        bounds = {left: left, top: script.y,
-          right: left + phWidth, bottom: bottom};
+        bounds = {left: left, top: script.y, right: right, bottom: bottom};
       } else {
         bounds.left = Math.min(bounds.left, left);
         bounds.top = Math.min(bounds.top, script.y);
-        bounds.right = Math.max(bounds.right, left + phWidth);
+        bounds.right = Math.max(bounds.right, right);
         bounds.bottom = Math.max(bounds.bottom, bottom);
+      }
+    }
+    // While scripts are still streaming in, the scrollable area must not
+    // shrink: estimates give way to measured sizes one script at a time, and a
+    // shrinking content box would nudge the scroll position under the user.
+    // Settling recomputes the exact bounds once.
+    var previous = workspace.deferredContentBounds_;
+    if (!opt_exact && previous) {
+      if (!bounds) {
+        bounds = previous;
+      } else {
+        bounds.left = Math.min(bounds.left, previous.left);
+        bounds.top = Math.min(bounds.top, previous.top);
+        bounds.right = Math.max(bounds.right, previous.right);
+        bounds.bottom = Math.max(bounds.bottom, previous.bottom);
       }
     }
     workspace.deferredContentBounds_ = bounds;
@@ -788,12 +847,13 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     if (script.placeholder || !script.hasPosition || !canvas) {
       return;
     }
+    var size = placeholderSize(script);
     script.placeholder = Blockly.utils.createSvgElement('rect', {
       'class': 'blocklyScriptPlaceholder',
-      'x': workspace.RTL ? script.x - phWidth : script.x,
+      'x': workspace.RTL ? script.x - size.width : script.x,
       'y': script.y,
-      'width': phWidth,
-      'height': scriptHeight(script),
+      'width': size.width,
+      'height': size.height,
       'rx': 8,
       'ry': 8
     }, canvas);
@@ -814,7 +874,7 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     if (index !== -1) {
       scripts.splice(index, 1);
     }
-    boundsDirty = true;
+    markChanged();
   };
   // Does the VM still have this script, as a top level block?
   var isStillOurs = function(script) {
@@ -822,8 +882,14 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
       return true;
     }
     var current = script.ctx.blocks[script.desc.id];
-    if (current) {
+    if (current && current !== script.desc) {
+      // The VM rebuilt this script's description, so its summary is stale.
       script.desc = current;
+      var size = Blockly.Xml.measureDesc_(current, script.ctx);
+      script.visible = size.visible;
+      script.rows = size.rows;
+      script.estimate = size.count;
+      script.procedure = size.procedure;
     }
     return !!current && current.topLevel !== false;
   };
@@ -852,6 +918,9 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
       var svgRoot = topBlock.getSvgRoot();
       if (svgRoot) {
         svgRoot.style.visibility = 'hidden';
+        if (staging && svgRoot.parentNode !== canvas) {
+          staging.appendChild(svgRoot);
+        }
       }
       if (script.hasPosition) {
         topBlock.moveBy(script.x, script.y);
@@ -883,11 +952,12 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     script.visible = size.visible;
     script.rows = size.rows;
     script.estimate = size.count;
+    script.procedure = size.procedure;
     script.topBlock = null;
     script.blocks = null;
     script.phase = -1;
     script.blockIndex = -1;
-    boundsDirty = true;
+    markChanged();
     return true;
   };
 
@@ -916,12 +986,12 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
       return;
     }
     var fired = false;
-    var run = function() {
+    var run = function(frameTime) {
       if (fired) {
         return;
       }
       fired = true;
-      fn();
+      fn(frameTime);
     };
     requestAnimationFrame(run);
     setTimeout(run, 250);
@@ -959,7 +1029,7 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
   };
   var scriptDistance = function(script, viewport) {
     var size = script.loaded && script.topBlock ? script.topBlock.getHeightWidth() :
-        {width: phWidth, height: scriptHeight(script)};
+        placeholderSize(script);
     var left = workspace.RTL ? script.x - size.width : script.x;
     var right = left + size.width;
     var bottom = script.y + size.height;
@@ -968,6 +1038,20 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     var dy = viewport.top > bottom ? viewport.top - bottom :
         (script.y > viewport.bottom ? script.y - viewport.bottom : 0);
     return dx + dy;
+  };
+  // Scripts that just came within loading range get their placeholder right
+  // away, so a freshly scrolled-to area shows where its scripts are instead of
+  // staying blank until each one's turn comes.
+  var showPlaceholdersNear = function(viewport, maxDist) {
+    for (var i = 0; i < scripts.length; i++) {
+      var script = scripts[i];
+      if (script.loaded || script.placeholder || script.disposer || !script.hasPosition) {
+        continue;
+      }
+      if (scriptDistance(script, viewport) <= maxDist) {
+        addPlaceholder(script);
+      }
+    }
   };
   var loadDistance = function(viewport) {
     return ((viewport.right - viewport.left) + (viewport.bottom - viewport.top)) *
@@ -1040,13 +1124,16 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     var topBlock = script.topBlock;
     try {
       if (script.phase === finalPhase) {
+        var svgRoot = topBlock.getSvgRoot();
+        if (svgRoot && staging && svgRoot.parentNode === staging) {
+          canvas.appendChild(svgRoot);
+        }
         topBlock.setConnectionsHidden(false);
         topBlock.updateDisabled();
         if (workspace.restoreGlows) {
           // It may have been running the whole time it was unloaded.
           workspace.restoreGlows(topBlock);
         }
-        var svgRoot = topBlock.getSvgRoot();
         if (svgRoot) {
           svgRoot.style.visibility = '';
         }
@@ -1070,10 +1157,15 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
       failures++;
     }
     if (script.phase === finalPhase) {
+      if (topBlock.workspace) {
+        var measured = topBlock.getHeightWidth();
+        script.width = measured.width;
+        script.height = measured.height;
+      }
       removePlaceholder(script);
       script.loaded = true;
       script.lastNear = now();
-      boundsDirty = true;
+      markChanged();
     } else if (deferredConnections && script.phase === 2) {
       if (++script.blockIndex >= script.blocks.length) script.phase++;
     } else {
@@ -1090,11 +1182,26 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
   };
 
   // Load whatever is near the viewport, a frame's worth at a time.
-  processFrame = function() {
+  processFrame = function(frameTime) {
     scheduled = false;
     if (cancelled) {
       return;
     }
+    var start = now();
+    var hasFrameTime = typeof frameTime == 'number' && frameTime > 0;
+    if (busyLastFrame && hasFrameTime && lastFrameTime) {
+      // Consecutive busy frames should arrive about 16 ms apart. A longer gap
+      // means the browser needed the rest of the frame for style, layout and
+      // paint of what was just added, so back off; quick frames earn it back.
+      var interval = frameTime - lastFrameTime;
+      if (interval > Blockly.Xml.DEFERRED_SLOW_FRAME_MS) {
+        budget = Math.max(Blockly.Xml.DEFERRED_RENDER_MIN_BUDGET_MS, budget * 0.6);
+      } else if (budget < Blockly.Xml.DEFERRED_RENDER_BUDGET_MS) {
+        budget = Math.min(Blockly.Xml.DEFERRED_RENDER_BUDGET_MS, budget + 0.5);
+      }
+    }
+    lastFrameTime = hasFrameTime ? frameTime : 0;
+    busyLastFrame = false;
     var gesture = workspace.currentGesture_;
     if ((gesture && gesture.isDraggingBlock_) ||
         (Blockly.WidgetDiv && Blockly.WidgetDiv.isVisible())) {
@@ -1105,17 +1212,14 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
       wake();
       return;
     }
-    if (!cacheOpen) {
-      cacheOpen = true;
-      Blockly.Field.startCache();
-    }
     workspace.deferredRenderActive = true;
     var panning = !!(gesture && gesture.isDraggingWorkspace_);
-    var disposalDeadline = now() + Blockly.Xml.DEFERRED_RENDER_BACKGROUND_BUDGET_MS;
+    var disposalDeadline = start + Blockly.Xml.DEFERRED_RENDER_BACKGROUND_BUDGET_MS;
     for (var u = 0; u < scripts.length; u++) {
       while (scripts[u].disposer) {
         stepUnload(scripts[u]);
         if (now() >= disposalDeadline) {
+          busyLastFrame = true;
           wake();
           return;
         }
@@ -1123,13 +1227,35 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     }
     var viewport = getViewport();
     var maxDist = viewport ? loadDistance(viewport) : Infinity;
+    if (viewport) {
+      var viewportKey = viewport.left + ',' + viewport.top + ',' +
+          viewport.right + ',' + viewport.bottom;
+      if (viewportKey !== lastViewportKey) {
+        lastViewportKey = viewportKey;
+        showPlaceholdersNear(viewport, maxDist);
+      }
+    }
     var pick = pickScript(viewport, maxDist);
-    var deadline = now() + (panning ? Blockly.Xml.DEFERRED_RENDER_BACKGROUND_BUDGET_MS :
-        Blockly.Xml.DEFERRED_RENDER_BUDGET_MS);
-    while (pick && now() < deadline) {
-      stepScript(pick.script);
-      if (pick.script.loaded || pick.script.failed) {
-        pick = pickScript(viewport, maxDist);
+    if (pick) {
+      if (!cacheOpen) {
+        cacheOpen = true;
+        Blockly.Field.startCache();
+      }
+      var deadline;
+      if (panning) {
+        deadline = start + Blockly.Xml.DEFERRED_RENDER_BACKGROUND_BUDGET_MS;
+      } else {
+        deadline = start + budget;
+        if (hasFrameTime) {
+          deadline = Math.min(deadline, frameTime + Blockly.Xml.DEFERRED_FRAME_TARGET_MS);
+        }
+        deadline = Math.max(deadline, start + Blockly.Xml.DEFERRED_RENDER_MIN_BUDGET_MS);
+      }
+      while (pick && now() < deadline) {
+        stepScript(pick.script);
+        if (pick.script.loaded || pick.script.failed) {
+          pick = pickScript(viewport, maxDist);
+        }
       }
     }
     if (boundsDirty) {
@@ -1145,6 +1271,7 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
       }
     }
     if (pick) {
+      busyLastFrame = true;
       reportProgress(pick.script, false);
       wake();
       return;
@@ -1152,21 +1279,27 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     settle();
   };
 
-  // Nothing near the viewport is waiting to load.
+  // Nothing near the viewport is waiting to load. Scrolling wakes the loader
+  // every frame, so an idle wake has to stay cheap: the scrollbars and
+  // visibility only need refreshing after something loaded or unloaded.
   settle = function() {
-    reportProgress(null, false);
     workspace.deferredRenderActive = false;
-    if (workspace.rendered && workspace.setResizesEnabled) {
-      workspace.setResizesEnabled(true);
-      workspace.resizeContents();
-      if (workspace.intersectionObserver) {
-        workspace.intersectionObserver.queueIntersectionCheck();
-      }
-    }
     if (cacheOpen) {
       cacheOpen = false;
       Blockly.Field.stopCache();
     }
+    if (settleWork) {
+      settleWork = false;
+      updateBounds(true);
+      if (workspace.rendered && workspace.setResizesEnabled) {
+        workspace.setResizesEnabled(true);
+        workspace.resizeContents();
+        if (workspace.intersectionObserver) {
+          workspace.intersectionObserver.queueIntersectionCheck();
+        }
+      }
+    }
+    reportProgress(null, false);
     if (!announcedDone) {
       announcedDone = true;
       if (workspace.refreshToolboxSelection_) {
@@ -1253,7 +1386,8 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
           y: s.y,
           xmlNode: s.xmlNode,
           desc: s.desc || null,
-          ctx: s.ctx || null
+          ctx: s.ctx || null,
+          procedure: s.desc ? (s.procedure || null) : undefined
         });
       }
     }
@@ -1402,6 +1536,11 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     workspace.wakeVirtualScripts_ = null;
     for (var i = 0; i < scripts.length; i++) {
       removePlaceholder(scripts[i]);
+    }
+    // Half-built scripts stay in the workspace exactly as an unstaged load
+    // would have left them: hidden, but in the canvas.
+    while (staging && staging.firstChild) {
+      canvas.appendChild(staging.firstChild);
     }
     if (sweepTimer !== null) {
       clearInterval(sweepTimer);
@@ -2078,6 +2217,8 @@ Blockly.Xml.measureDesc_ = function(desc, ctx) {
   var count = 0;
   var visible = 0;
   var rows = 1;
+  var prototypeMutation = null;
+  var hasReturn = false;
   Blockly.Xml.forEachDescBlock(desc, ctx, function(d) {
     count++;
     if (!d.shadow) {
@@ -2086,8 +2227,20 @@ Blockly.Xml.measureDesc_ = function(desc, ctx) {
     if (d.next) {
       rows++;
     }
+    if (d.opcode == Blockly.PROCEDURES_PROTOTYPE_BLOCK_TYPE && d.mutation) {
+      prototypeMutation = d.mutation;
+    } else if (d.opcode == Blockly.PROCEDURES_RETURN_BLOCK_TYPE) {
+      hasReturn = true;
+    }
   });
-  return {count: count, visible: visible, rows: rows};
+  // The procedure summary lets toolbox refreshes find custom block
+  // definitions in unrendered scripts without walking them again.
+  return {
+    count: count,
+    visible: visible,
+    rows: rows,
+    procedure: prototypeMutation ? {mutation: prototypeMutation, hasReturn: hasReturn} : null
+  };
 };
 
 /**
