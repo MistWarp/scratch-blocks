@@ -577,8 +577,7 @@ Blockly.Field.APPROXIMATION_THRESHOLD_ = 2;
  */
 Blockly.Field.LRUCache_ = function(maxSize) {
   this.maxSize = maxSize;
-  this.cache = Object.create(null);
-  this.keys = [];
+  this.cache = new window.Map();
 };
 
 /**
@@ -587,14 +586,10 @@ Blockly.Field.LRUCache_ = function(maxSize) {
  * @return {*} The cached value, or undefined if not found.
  */
 Blockly.Field.LRUCache_.prototype.get = function(key) {
-  var value = this.cache[key];
+  var value = this.cache.get(key);
   if (value !== undefined) {
-    // Move to end (most recently used)
-    var index = this.keys.indexOf(key);
-    if (index !== -1 && index !== this.keys.length - 1) {
-      this.keys.splice(index, 1);
-      this.keys.push(key);
-    }
+    this.cache.delete(key);
+    this.cache.set(key, value);
   }
   return value;
 };
@@ -605,31 +600,19 @@ Blockly.Field.LRUCache_.prototype.get = function(key) {
  * @param {*} value The value to cache.
  */
 Blockly.Field.LRUCache_.prototype.set = function(key, value) {
-  if (this.cache[key] === undefined) {
-    // New entry
-    if (this.keys.length >= this.maxSize) {
-      // Evict oldest entry
-      var oldestKey = this.keys.shift();
-      delete this.cache[oldestKey];
-    }
-    this.keys.push(key);
-  } else {
-    // Update existing - move to end
-    var index = this.keys.indexOf(key);
-    if (index !== -1) {
-      this.keys.splice(index, 1);
-      this.keys.push(key);
-    }
+  if (this.cache.has(key)) {
+    this.cache.delete(key);
+  } else if (this.cache.size >= this.maxSize) {
+    this.cache.delete(this.cache.keys().next().value);
   }
-  this.cache[key] = value;
+  this.cache.set(key, value);
 };
 
 /**
  * Clear all entries from the cache.
  */
 Blockly.Field.LRUCache_.prototype.clear = function() {
-  this.cache = Object.create(null);
-  this.keys = [];
+  this.cache.clear();
 };
 
 /**

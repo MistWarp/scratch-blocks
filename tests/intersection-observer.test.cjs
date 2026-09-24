@@ -43,18 +43,18 @@ test('a check with an unchanged viewport only revisits blocks that moved', () =>
   assert.equal(near.intersects_, true);
   assert.equal(far.intersects_, false);
   assert.equal(near.measured, 1);
-  assert.equal(far.measured, 1);
+  assert.equal(far.measured, 0);
 
   observer.checkForIntersections();
   assert.equal(near.measured, 1);
-  assert.equal(far.measured, 1);
+  assert.equal(far.measured, 0);
 
   far.x = 20;
   far.y = 20;
   observer.markDirty(far);
   observer.checkForIntersections();
   assert.equal(near.measured, 1);
-  assert.equal(far.measured, 2);
+  assert.equal(far.measured, 1);
   assert.equal(far.intersects_, true);
 });
 
@@ -69,13 +69,31 @@ test('moving the viewport revisits every observed block', () => {
 
   workspace.canvas.x = -500;
   observer.checkForIntersections();
-  assert.deepEqual(blocks.map(block => block.measured), [2, 2, 2]);
+  assert.deepEqual(blocks.map(block => block.measured), [2, 1, 0]);
   assert.deepEqual(blocks.map(block => block.intersects_), [false, true, false]);
 
   workspace.scale = 0.5;
   workspace.canvas.x = 0;
   observer.checkForIntersections();
   assert.deepEqual(blocks.map(block => block.intersects_), [true, true, true]);
+});
+
+test('blocks past the bottom or right edge are hidden without being measured', () => {
+  const Blockly = load();
+  const workspace = makeWorkspace();
+  const observer = new Blockly.IntersectionObserver(workspace);
+  const blocks = [makeBlock(900, 10), makeBlock(10, 700), makeBlock(-200, 10), makeBlock(10, -100)];
+  blocks.forEach(block => observer.observe(block));
+  observer.checkForIntersections();
+  assert.deepEqual(blocks.map(block => block.intersects_), [false, false, false, false]);
+  assert.deepEqual(blocks.map(block => block.measured), [0, 0, 1, 1]);
+
+  workspace.RTL = true;
+  blocks[0].x = 850;
+  observer.markDirty(blocks[0]);
+  observer.checkForIntersections();
+  assert.equal(blocks[0].measured, 1);
+  assert.equal(blocks[0].intersects_, true);
 });
 
 test('dirty marks are ignored for unobserved blocks and cleared by unobserveAll', () => {

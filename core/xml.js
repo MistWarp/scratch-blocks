@@ -478,6 +478,7 @@ Blockly.Xml.createBlockDisposer_ = function(topBlock) {
 Blockly.Xml.DEFERRED_RENDER_BUDGET_MS = 8;
 Blockly.Xml.DEFERRED_RENDER_MIN_BUDGET_MS = 2;
 Blockly.Xml.DEFERRED_RENDER_BACKGROUND_BUDGET_MS = 2;
+Blockly.Xml.DEFERRED_SCROLL_IDLE_MS = 120;
 
 /**
  * How far into a frame the loader may keep working, measured from the frame's
@@ -754,6 +755,7 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
   var announcedDone = false;
   var cacheOpen = true;
   var sweepTimer = null;
+  var settleTimer = null;
   var boundsDirty = false;
   var settleWork = true;
   var budget = Blockly.Xml.DEFERRED_RENDER_BUDGET_MS;
@@ -923,7 +925,13 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
         }
       }
       if (script.hasPosition) {
-        topBlock.moveBy(script.x, script.y);
+        var resizesEnabled = workspace.resizesEnabled_;
+        workspace.resizesEnabled_ = false;
+        try {
+          topBlock.moveBy(script.x, script.y);
+        } finally {
+          workspace.resizesEnabled_ = resizesEnabled;
+        }
         if (topBlock.comment && typeof topBlock.comment === 'object') {
           var commentXY = topBlock.comment.getXY();
           var commentWidth = topBlock.comment.getBubbleSize().width;
@@ -995,6 +1003,10 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     };
     requestAnimationFrame(run);
     setTimeout(run, 250);
+  };
+  var isScrolling = function() {
+    return !!workspace.lastScrollTime_ &&
+        now() - workspace.lastScrollTime_ < Blockly.Xml.DEFERRED_SCROLL_IDLE_MS;
   };
   var wake = function() {
     if (cancelled || scheduled) {
@@ -1213,7 +1225,7 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
       return;
     }
     workspace.deferredRenderActive = true;
-    var panning = !!(gesture && gesture.isDraggingWorkspace_);
+    var panning = !!(gesture && gesture.isDraggingWorkspace_) || isScrolling();
     var disposalDeadline = start + Blockly.Xml.DEFERRED_RENDER_BACKGROUND_BUDGET_MS;
     for (var u = 0; u < scripts.length; u++) {
       while (scripts[u].disposer) {
@@ -1276,17 +1288,26 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
       wake();
       return;
     }
-    settle();
+    settle(panning);
   };
 
   // Nothing near the viewport is waiting to load. Scrolling wakes the loader
   // every frame, so an idle wake has to stay cheap: the scrollbars and
   // visibility only need refreshing after something loaded or unloaded.
-  settle = function() {
+  settle = function(opt_panning) {
     workspace.deferredRenderActive = false;
     if (cacheOpen) {
       cacheOpen = false;
       Blockly.Field.stopCache();
+    }
+    if (settleWork && opt_panning) {
+      if (settleTimer === null) {
+        settleTimer = setTimeout(function() {
+          settleTimer = null;
+          wake();
+        }, Blockly.Xml.DEFERRED_SCROLL_IDLE_MS);
+      }
+      return;
     }
     if (settleWork) {
       settleWork = false;
@@ -1315,7 +1336,7 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     if (cancelled) {
       return;
     }
-    if (workspace.currentGesture_ || (Blockly.WidgetDiv && Blockly.WidgetDiv.isVisible())) return;
+    if (workspace.currentGesture_ || isScrolling() || (Blockly.WidgetDiv && Blockly.WidgetDiv.isVisible())) return;
     var cachedBlocks = 0;
     for (var c = 0; c < scripts.length; c++) {
       if (scripts[c].loaded) cachedBlocks += scripts[c].blocks.length;
@@ -1545,6 +1566,10 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     if (sweepTimer !== null) {
       clearInterval(sweepTimer);
       sweepTimer = null;
+    }
+    if (settleTimer !== null) {
+      clearTimeout(settleTimer);
+      settleTimer = null;
     }
     if (cacheOpen) {
       cacheOpen = false;
@@ -2306,7 +2331,10 @@ Blockly.Xml.descsToWorkspace_ = function(descs, workspace) {
  * @private
  */
 Blockly.Xml.restoreFrameVisibility_ = function(workspace, block) {
-  var frames = workspace.getTopFrames ? workspace.getTopFrames() : [];
+  var frames = workspace.topFrames_;
+  if (!frames || !frames.length) {
+    return;
+  }
   for (var i = 0; i < frames.length; i++) {
     if (frames[i].isCollapsed() && frames[i].getBlockIds().indexOf(block.id) !== -1) {
       block.getSvgRoot().style.display = 'none';
