@@ -84,6 +84,22 @@ function test_deferredLoadViewportAndExport() {
   });
 }
 
+function test_deferredSettleWaitsForScrollingToStop() {
+  deferredXmlTest(function(ws, ctx, view, flush, clock) {
+    var done = 0;
+    ws.markUserScroll();
+    Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(
+        Blockly.Xml.textToDom('<xml/>'), ws, {onDone: function() { done++; }}, ctx);
+    flush();
+    assertNotNull('Scripts still load while scrolling', ws.getBlockById('near'));
+    assertEquals('Settling waits until scrolling stops', 0, done);
+    ws.lastScrollTime_ = 0;
+    clock.tick(Blockly.Xml.DEFERRED_SCROLL_IDLE_MS);
+    flush();
+    assertEquals(1, done);
+  });
+}
+
 function test_deferredUnloadPreservesEditsAndUndo() {
   deferredXmlTest(function(ws, ctx, view, flush, clock) {
     Blockly.Xml.VIRTUAL_CACHE_BLOCKS = 0;

@@ -713,6 +713,11 @@ Blockly.WorkspaceSvg.prototype.resizeContents = function() {
   this.updateInverseScreenCTM();
 };
 
+Blockly.WorkspaceSvg.prototype.markUserScroll = function() {
+  this.lastScrollTime_ = (typeof performance != 'undefined' && performance.now) ?
+      performance.now() : Date.now();
+};
+
 Blockly.WorkspaceSvg.prototype.queueIntersectionCheck = function() {
   if (this.intersectionObserver) {
     this.intersectionObserver.queueIntersectionCheck();
@@ -1524,6 +1529,7 @@ Blockly.WorkspaceSvg.prototype.isDraggable = function() {
  * @private
  */
 Blockly.WorkspaceSvg.prototype.onMouseWheel_ = function(e) {
+  this.markUserScroll();
   // TODO: Remove gesture cancellation and compensate for coordinate skew during
   // zoom.
   if (this.currentGesture_) {

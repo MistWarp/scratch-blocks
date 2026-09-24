@@ -131,29 +131,25 @@ Blockly.IntersectionObserver.prototype.checkForIntersections = function() {
       continue;
     }
     var blockPos = block.getRelativeToSurfaceXY();
-    var blockSize = block.getHeightWidth();
-
-    // Cache scaled values
-    var scaledBlockWidth = blockSize.width * workspaceScale;
-    var scaledBlockHeight = blockSize.height * workspaceScale;
     var scaledPosX = blockPos.x * workspaceScale;
-    var scaledPosY = blockPos.y * workspaceScale;
-
-    if (RTL) {
-      scaledPosX -= scaledBlockWidth;
+    var canvasPlusY = canvasPos.y + blockPos.y * workspaceScale;
+    var visible;
+    if (canvasPlusY - margin > workspaceHeight ||
+        (!RTL && canvasPos.x + scaledPosX - margin > workspaceWidth)) {
+      visible = false;
+    } else {
+      var blockSize = block.getHeightWidth();
+      var scaledBlockWidth = blockSize.width * workspaceScale;
+      if (RTL) {
+        scaledPosX -= scaledBlockWidth;
+      }
+      var canvasPlusX = canvasPos.x + scaledPosX;
+      visible = !(
+        canvasPlusX - margin > workspaceWidth ||
+        canvasPlusX + scaledBlockWidth + margin < 0 ||
+        canvasPlusY + blockSize.height * workspaceScale + margin < 0
+      );
     }
-
-    // Cache canvas + position values
-    var canvasPlusX = canvasPos.x + scaledPosX;
-    var canvasPlusY = canvasPos.y + scaledPosY;
-
-    // Single visibility check with early exit
-    var visible = !(
-      canvasPlusY - margin > workspaceHeight ||
-      canvasPlusX - margin > workspaceWidth ||
-      canvasPlusX + scaledBlockWidth + margin < 0 ||
-      canvasPlusY + scaledBlockHeight + margin < 0
-    );
 
     block.setIntersects(visible);
   }

@@ -252,7 +252,7 @@ Blockly.BlockDragger.prototype.startBlockDrag = function(currentDragDeltaXY) {
 
   // Adaptively throttle connection searching for huge workspaces.
   // Counting connections is cheap compared to searching them on every move.
-  this.connectionUpdateMinIntervalMs_ = 16;
+  this.connectionUpdateMinIntervalMs_ = 8;
   this.lastConnectionUpdateTimeMs_ = 0;
   if (this.workspace_.connectionDBList) {
     var totalConnections = 0;
@@ -313,13 +313,17 @@ Blockly.BlockDragger.prototype.dragBlock = function(e, currentDragDeltaXY, opt_f
   this.deleteArea_ = this.workspace_.isDeleteArea(e);
   var isOutside = !this.workspace_.isInsideBlocksArea(e);
 
-  if (opt_forceConnectionUpdate) {
+  var now = Date.now();
+  if (opt_forceConnectionUpdate ||
+      this.deleteArea_ === Blockly.DELETE_AREA_TRASH ||
+      this.deleteArea_ === Blockly.DELETE_AREA_TOOLBOX ||
+      now - this.lastConnectionUpdateTimeMs_ >= this.connectionUpdateMinIntervalMs_) {
     if (this.connectionUpdateRafId_ !== null) {
       cancelAnimationFrame(this.connectionUpdateRafId_);
       this.connectionUpdateRafId_ = null;
     }
     this.pendingConnectionUpdate_ = null;
-    this.lastConnectionUpdateTimeMs_ = Date.now();
+    this.lastConnectionUpdateTimeMs_ = now;
     this.draggedConnectionManager_.update(delta, this.deleteArea_);
   } else {
     this.queueConnectionUpdate_(delta, this.deleteArea_);
