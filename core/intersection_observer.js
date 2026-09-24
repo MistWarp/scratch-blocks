@@ -5,6 +5,14 @@ goog.provide('Blockly.IntersectionObserver');
 Blockly.IntersectionObserver = function(workspace) {
   this.workspace = workspace;
   this.observing = [];
+  /**
+   * Observed blocks whose position or size changed since the last check. When
+   * the viewport itself has not moved, only these need a new hit test.
+   * @type {!Array.<!Blockly.BlockSvg>}
+   * @private
+   */
+  this.dirty_ = [];
+  this.viewportKey_ = '';
   this.intersectionCheckQueued = false;
   this.checkForIntersections = this.checkForIntersections.bind(this);
 };
@@ -14,6 +22,7 @@ Blockly.IntersectionObserver.prototype.observe = function(block) {
     block.intersectionObserved_ = true;
     this.observing.push(block);
   }
+  this.markDirty(block);
 };
 
 Blockly.IntersectionObserver.prototype.unobserve = function(block) {
@@ -28,6 +37,18 @@ Blockly.IntersectionObserver.prototype.unobserve = function(block) {
 };
 
 /**
+ * Note that a block moved or was resized, so its visibility needs another look
+ * even if the viewport stays where it is.
+ * @param {!Blockly.BlockSvg} block The block.
+ */
+Blockly.IntersectionObserver.prototype.markDirty = function(block) {
+  if (block.intersectionObserved_ && !block.intersectionDirty_) {
+    block.intersectionDirty_ = true;
+    this.dirty_.push(block);
+  }
+};
+
+/**
  * Stop observing everything at once. Disposing blocks one at a time would be
  * quadratic, so workspace.clear() calls this instead.
  */
@@ -36,6 +57,14 @@ Blockly.IntersectionObserver.prototype.unobserveAll = function() {
     this.observing[i].intersectionObserved_ = false;
   }
   this.observing.length = 0;
+  this.clearDirty_();
+};
+
+Blockly.IntersectionObserver.prototype.clearDirty_ = function() {
+  for (var i = 0; i < this.dirty_.length; i++) {
+    this.dirty_[i].intersectionDirty_ = false;
+  }
+  this.dirty_.length = 0;
 };
 
 Blockly.IntersectionObserver.prototype.dispose = function() {
@@ -76,33 +105,48 @@ Blockly.IntersectionObserver.prototype.checkForIntersections = function() {
     var canvasPos = Blockly.utils.getRelativeXY(workspace.getCanvas());
   }
 
+  // Only blocks that moved need a new hit test while the viewport stays put.
+  var viewportKey = canvasPos.x + ',' + canvasPos.y + ',' + workspaceScale + ',' +
+      workspaceWidth + ',' + workspaceHeight + ',' + RTL;
+  var blocks;
+  if (viewportKey === this.viewportKey_) {
+    if (!this.dirty_.length) {
+      return;
+    }
+    blocks = this.dirty_.slice();
+  } else {
+    this.viewportKey_ = viewportKey;
+    blocks = this.observing;
+  }
+  this.clearDirty_();
+
   // Allow blocks to go slightly offscreen so that effects such as glow do not get cut off.
   var margin = 12 * workspaceScale;
 
-  for (var i = 0; i < this.observing.length; i++) {
-    var block = this.observing[i];
-    if (!block.rendered) {
+  for (var i = 0; i < blocks.length; i++) {
+    var block = blocks[i];
+    if (!block.intersectionObserved_ || !block.rendered) {
       // Size is unknown until the block renders, so any hit test would be
       // wrong. Rendering re-queues a check.
       continue;
     }
     var blockPos = block.getRelativeToSurfaceXY();
     var blockSize = block.getHeightWidth();
-    
+
     // Cache scaled values
     var scaledBlockWidth = blockSize.width * workspaceScale;
     var scaledBlockHeight = blockSize.height * workspaceScale;
     var scaledPosX = blockPos.x * workspaceScale;
     var scaledPosY = blockPos.y * workspaceScale;
-    
+
     if (RTL) {
       scaledPosX -= scaledBlockWidth;
     }
-    
+
     // Cache canvas + position values
     var canvasPlusX = canvasPos.x + scaledPosX;
     var canvasPlusY = canvasPos.y + scaledPosY;
-    
+
     // Single visibility check with early exit
     var visible = !(
       canvasPlusY - margin > workspaceHeight ||

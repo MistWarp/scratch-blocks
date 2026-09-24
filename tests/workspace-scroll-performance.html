@@ -1,0 +1,144 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Workspace scroll performance check</title>
+<script>
+  document.write('<script src="' + (new URLSearchParams(location.search).has('baseline') ?
+    '../node_modules/.cache/mistwarp-performance/baseline.js' : '../blockly_compressed_vertical.js') + '"><\/script>');
+</script>
+<script src="../blocks_compressed.js"></script>
+<script src="../blocks_compressed_vertical.js"></script>
+<script src="../msg/messages.js"></script>
+<button id="run">Run 400-script load and scroll sweeps</button>
+<pre id="result">Ready</pre>
+<div id="workspace" style="width:800px;height:600px"></div>
+<script>
+  document.getElementById('run').onclick = async function () {
+    this.disabled = true;
+    const result = document.getElementById('result');
+    const params = new URLSearchParams(location.search);
+    const columns = Number(params.get('columns')) || 20;
+    const rows = Number(params.get('rows')) || 20;
+    const stack = Number(params.get('stack')) || 8;
+    const raf = window.requestAnimationFrame;
+    const timers = {};
+    const time = (name, fn, thisArg, args) => {
+      const start = performance.now();
+      try { return fn.apply(thisArg, args); }
+      finally {
+        const t = timers[name] || (timers[name] = {ms: 0, max: 0, count: 0});
+        const took = performance.now() - start;
+        t.ms += took; t.count++; if (took > t.max) t.max = took;
+      }
+    };
+    const patched = [];
+    const patch = (obj, key, name) => {
+      const original = obj[key];
+      if (typeof original !== 'function') return;
+      patched.push([obj, key, original]);
+      obj[key] = function () { return time(name, original, this, arguments); };
+    };
+    window.requestAnimationFrame = fn => raf.call(window, ts => time('loaderFrame', fn, window, [ts]));
+    if (Blockly.IntersectionObserver) {
+      patch(Blockly.IntersectionObserver.prototype, 'checkForIntersections', 'intersections');
+    }
+    patch(Blockly.WorkspaceSvg.prototype, 'getBlocksBoundingBox', 'blocksBoundingBox');
+    patch(Blockly.WorkspaceSvg.prototype, 'resizeContents', 'resizeContents');
+    patch(Blockly.BlockSvg.prototype, 'getHeightWidth', 'getHeightWidth');
+    const workspace = Blockly.inject('workspace', {scrollbars: true});
+    const ctx = {blocks: {}, scripts: [], comments: {}};
+    let n = 0;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < columns; c++) {
+        const ids = [];
+        for (let i = 0; i < stack; i++) ids.push('b' + (n++));
+        ctx.scripts.push(ids[0]);
+        ids.forEach((id, i) => {
+          ctx.blocks[id] = {id, opcode: 'motion_movesteps', topLevel: i === 0,
+            parent: i ? ids[i - 1] : null, next: i < stack - 1 ? ids[i + 1] : null,
+            x: 20 + c * 360, y: 20 + r * 560, fields: {},
+            inputs: {STEPS: {name: 'STEPS', block: 'n' + id, shadow: 'n' + id}}};
+          ctx.blocks['n' + id] = {id: 'n' + id, opcode: 'math_number', shadow: true, parent: id,
+            inputs: {}, fields: {NUM: {name: 'NUM', value: String(i)}}};
+        });
+      }
+    }
+    const frame = () => new Promise(resolve => raf.call(window, resolve));
+    const snapshot = () => JSON.parse(JSON.stringify(timers));
+    const diff = (before, after) => {
+      const out = {};
+      for (const key of Object.keys(after)) {
+        const a = after[key]; const b = before[key] || {ms: 0, max: 0, count: 0};
+        out[key] = {ms: Math.round((a.ms - b.ms) * 10) / 10, max: Math.round(a.max * 10) / 10, count: a.count - b.count};
+      }
+      return out;
+    };
+    const sweep = async (frames, dy) => {
+      const before = snapshot();
+      let lastTs = null;
+      let maxDelta = 0;
+      let jank = 0;
+      let scrollMs = 0;
+      let scrollMax = 0;
+      const start = performance.now();
+      for (let i = 0; i < frames; i++) {
+        const ts = await frame();
+        if (lastTs !== null) {
+          const delta = ts - lastTs;
+          if (delta > maxDelta) maxDelta = delta;
+          if (delta > 25) jank++;
+        }
+        lastTs = ts;
+        const t0 = performance.now();
+        workspace.startDragMetrics = workspace.getMetrics();
+        workspace.scroll(workspace.scrollX, workspace.scrollY + dy);
+        const took = performance.now() - t0;
+        scrollMs += took;
+        if (took > scrollMax) scrollMax = took;
+      }
+      await frame();
+      return {frames, totalMs: Math.round(performance.now() - start), maxFrameDeltaMs: Math.round(maxDelta * 10) / 10,
+        jankFrames: jank, scrollCallMs: Math.round(scrollMs * 10) / 10, scrollCallMaxMs: Math.round(scrollMax * 10) / 10,
+        timers: diff(before, snapshot())};
+    };
+    try {
+      const loadStart = performance.now();
+      await new Promise(resolve => {
+        Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), workspace, {onDone: resolve}, ctx);
+      });
+      const loadMs = Math.round(performance.now() - loadStart);
+      const loadTimers = snapshot();
+      const loadedAfterLoad = workspace.getAllBlocks().length;
+      const idleBefore = snapshot();
+      for (let i = 0; i < 30; i++) await frame();
+      const idle = diff(idleBefore, snapshot());
+      const down = await sweep(240, -40);
+      const loadedAfterDown = workspace.getAllBlocks().length;
+      const up = await sweep(240, 40);
+      const loadedAfterUp = workspace.getAllBlocks().length;
+      const editBefore = snapshot();
+      const editStart = performance.now();
+      workspace.getBlockById('nb0').setFieldValue('12345', 'NUM');
+      await Promise.resolve();
+      await frame();
+      const editMs = Math.round((performance.now() - editStart) * 10) / 10;
+      const edit = diff(editBefore, snapshot());
+      result.textContent = JSON.stringify({
+        scripts: ctx.scripts.length, blocks: Object.keys(ctx.blocks).length,
+        loadMs, loadedAfterLoad,
+        loadFrames: loadTimers.loaderFrame ? loadTimers.loaderFrame.count : 0,
+        maxLoadFrameMs: loadTimers.loaderFrame ? Math.round(loadTimers.loaderFrame.max * 10) / 10 : 0,
+        idle30Frames: idle,
+        sweepDown: down, loadedAfterDown,
+        sweepUp: up, loadedAfterUp,
+        editMs, edit
+      }, null, 2);
+    } catch (error) {
+      result.textContent = error.stack;
+    } finally {
+      patched.forEach(([obj, key, original]) => { obj[key] = original; });
+      window.requestAnimationFrame = raf;
+      workspace.dispose();
+      this.disabled = false;
+    }
+  };
+</script>

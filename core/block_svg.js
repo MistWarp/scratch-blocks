@@ -311,9 +311,9 @@ Blockly.BlockSvg.prototype.updateIntersectionObserver = function() {
         this.setIntersects(true);
       }
     } else {
+      // Observing also marks the block for a fresh hit test: its size is only
+      // known once it has rendered, so re-check visibility now that it has.
       this.workspace.intersectionObserver.observe(this);
-      // The block's size is only known once it has rendered, so re-check
-      // visibility now that it has.
       this.workspace.queueIntersectionCheck();
     }
   }
@@ -446,6 +446,9 @@ Blockly.BlockSvg.prototype.moveBy = function(dx, dy) {
 Blockly.BlockSvg.prototype.translate = function(x, y) {
   this.getSvgRoot().setAttribute('transform',
       'translate(' + x + ',' + y + ')');
+  if (this.intersectionObserved_ && this.workspace.intersectionObserver) {
+    this.workspace.intersectionObserver.markDirty(this);
+  }
 };
 
 /**
