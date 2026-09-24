@@ -319,6 +319,12 @@ Blockly.BlockSvg.prototype.updateIntersectionObserver = function() {
   }
 };
 
+Blockly.BlockSvg.isProcedureColourRoot_ = function(block) {
+  return block.type == Blockly.PROCEDURES_DEFINITION_BLOCK_TYPE ||
+      block.type == Blockly.PROCEDURES_PROTOTYPE_BLOCK_TYPE ||
+      block.type == 'procedures_declaration';
+};
+
 /**
  * Set parent of this block to be a new block or null.
  * @param {Blockly.BlockSvg} newParent New parent block.
@@ -361,6 +367,11 @@ Blockly.BlockSvg.prototype.setParent = function(newParent) {
     this.translate(oldXY.x, oldXY.y);
   }
 
+  if (this.isInsertionMarker() ||
+      (!Blockly.BlockSvg.isProcedureColourRoot_(oldParent ? oldParent.getRootBlock() : this) &&
+       !Blockly.BlockSvg.isProcedureColourRoot_(this.getRootBlock()))) {
+    return;
+  }
   // A moved stack can contain argument reporters or returns from a different
   // procedure. Refresh their inherited colours after the parent has changed.
   var descendants = this.getDescendants(false);

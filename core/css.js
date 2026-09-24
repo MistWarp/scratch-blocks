@@ -387,8 +387,6 @@ Blockly.Css.CONTENT = [
 
   '.blocklyScriptPlaceholder {',
     'fill: rgba(127, 127, 127, 0.12);',
-    'stroke: rgba(127, 127, 127, 0.25);',
-    'stroke-dasharray: 6 4;',
   '}',
 
   '.blocklySelected>.blocklyPath {',
