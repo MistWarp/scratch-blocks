@@ -494,6 +494,17 @@ Blockly.Xml.DEFERRED_FRAME_TARGET_MS = 12;
  * added, so the budget shrinks.
  */
 Blockly.Xml.DEFERRED_SLOW_FRAME_MS = 24;
+
+/**
+ * Showing finished scripts repaints everything already on screen, so they are
+ * shown in batches: at most this often, and only once the batch holds at least
+ * DEFERRED_REVEAL_MIN_BLOCKS blocks or DEFERRED_REVEAL_GROWTH times the blocks
+ * already showing. Batches grow with the workspace, which keeps the number of
+ * repaints logarithmic in its size instead of linear.
+ */
+Blockly.Xml.DEFERRED_REVEAL_INTERVAL_MS = 300;
+Blockly.Xml.DEFERRED_REVEAL_MIN_BLOCKS = 200;
+Blockly.Xml.DEFERRED_REVEAL_GROWTH = 1;
 Blockly.Xml.DEFERRED_SCRIPT_WIDTH_ESTIMATE = 300;
 Blockly.Xml.DEFERRED_BLOCK_HEIGHT_ESTIMATE = 48;
 
@@ -768,28 +779,6 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
   var failures = 0;
   var deferredConnections = !!Blockly.BlockSvg.prototype.renderDeferredConnections_;
   var finalPhase = deferredConnections ? 3 : 2;
-  var reportProgress = function(script, paused) {
-    if (!callbacks.onProgress) return;
-    var t = now();
-    var phase = !script ? (failures ? 'error' : 'idle') :
-        paused ? 'paused' : script.phase === -1 ? 'building' :
-        script.phase === 0 ? 'drawing' : script.phase === 1 ? 'layout' : 'finishing';
-    if (script && phase === lastProgressPhase && t - lastProgress < 100) return;
-    if (!script && phase === lastProgressPhase) return;
-    lastProgress = t;
-    lastProgressPhase = phase;
-    callbacks.onProgress({
-      phase: phase,
-      completed: !script ? 0 : script.phase === -1 ?
-          (script.builder ? script.builder.blocks.length : 0) :
-          script.phase === finalPhase ? script.blocks.length :
-          deferredConnections && script.phase === 2 ? script.blockIndex :
-          script.blocks.length - script.blockIndex - 1,
-      total: script ? (script.blocks ? script.blocks.length : script.estimate) : 0,
-      failures: failures
-    });
-  };
-
   var now = function() {
     return (typeof performance != 'undefined' && performance.now) ?
         performance.now() : Date.now();
@@ -896,6 +885,49 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     return !!current && current.topLevel !== false;
   };
 
+  var pendingReveal = [];
+  var pendingRevealBlocks = 0;
+  var lastReveal = -Infinity;
+  var revealScript = function(script) {
+    removePlaceholder(script);
+    var topBlock = script.topBlock;
+    if (!topBlock || !topBlock.workspace) return;
+    var svgRoot = topBlock.getSvgRoot();
+    if (!svgRoot) return;
+    if (staging && svgRoot.parentNode === staging) {
+      canvas.appendChild(svgRoot);
+    }
+    svgRoot.style.visibility = '';
+    Blockly.Xml.restoreFrameVisibility_(workspace, topBlock);
+  };
+  var revealedBlocks = function() {
+    var count = 0;
+    for (var i = 0; i < scripts.length; i++) {
+      var script = scripts[i];
+      if (script.loaded && script.topBlock && pendingReveal.indexOf(script) === -1) {
+        count += script.visible;
+      }
+    }
+    return count;
+  };
+  var flushReveals = function(force) {
+    if (!pendingReveal.length) return;
+    var t = now();
+    if (!force) {
+      if (t - lastReveal < Blockly.Xml.DEFERRED_REVEAL_INTERVAL_MS) return;
+      var needed = Math.max(Blockly.Xml.DEFERRED_REVEAL_MIN_BLOCKS,
+          revealedBlocks() * Blockly.Xml.DEFERRED_REVEAL_GROWTH);
+      if (pendingRevealBlocks < needed) return;
+    }
+    lastReveal = t;
+    var batch = pendingReveal;
+    pendingReveal = [];
+    pendingRevealBlocks = 0;
+    for (var i = 0; i < batch.length; i++) {
+      revealScript(batch[i]);
+    }
+  };
+
   var materializeScript = function(script) {
     addPlaceholder(script);
     Blockly.Events.disable();
@@ -988,7 +1020,26 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     return true;
   };
 
-  var schedule = function(fn) {
+  var channel = null;
+  var channelCallback = null;
+  if (typeof MessageChannel != 'undefined') {
+    channel = new MessageChannel();
+    channel.port1.onmessage = function() {
+      var fn = channelCallback;
+      channelCallback = null;
+      if (fn) fn();
+    };
+  }
+  var inputPending = function() {
+    return !!(typeof navigator != 'undefined' && navigator.scheduling &&
+        navigator.scheduling.isInputPending && navigator.scheduling.isInputPending());
+  };
+  var schedule = function(fn, urgent) {
+    if (urgent && channel) {
+      channelCallback = fn;
+      channel.port2.postMessage(null);
+      return;
+    }
     if (typeof requestAnimationFrame == 'undefined') {
       setTimeout(fn, 16);
       return;
@@ -1008,12 +1059,17 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     return !!workspace.lastScrollTime_ &&
         now() - workspace.lastScrollTime_ < Blockly.Xml.DEFERRED_SCROLL_IDLE_MS;
   };
-  var wake = function() {
-    if (cancelled || scheduled) {
+  var scheduledUrgent = false;
+  var wake = function(urgent) {
+    if (cancelled) {
+      return;
+    }
+    if (scheduled && (scheduledUrgent || urgent !== true)) {
       return;
     }
     scheduled = true;
-    schedule(processFrame);
+    scheduledUrgent = urgent === true;
+    schedule(processFrame, scheduledUrgent);
   };
 
   var getViewport = function() {
@@ -1068,6 +1124,52 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
   var loadDistance = function(viewport) {
     return ((viewport.right - viewport.left) + (viewport.bottom - viewport.top)) *
         Blockly.Xml.VIRTUAL_LOAD_SCREENS;
+  };
+
+  var scriptFraction = function(script) {
+    var phases = finalPhase + 1;
+    if (script.phase === -1) {
+      var built = script.builder ? script.builder.blocks.length : 0;
+      return Math.min(built / Math.max(script.estimate, 1), 1) / phases;
+    }
+    if (script.phase >= finalPhase) {
+      return 1;
+    }
+    var count = script.blocks ? script.blocks.length : 0;
+    var within = !count ? 1 :
+        deferredConnections && script.phase === 2 ? script.blockIndex / count :
+        (count - 1 - script.blockIndex) / count;
+    return (script.phase + 1 + Math.min(Math.max(within, 0), 1)) / phases;
+  };
+  var reportProgress = function(script, paused, viewport, maxDist) {
+    if (!callbacks.onProgress) return;
+    var t = now();
+    var phase = !script ? (failures ? 'error' : 'idle') :
+        paused ? 'paused' : script.phase === -1 ? 'building' :
+        script.phase === 0 ? 'drawing' : script.phase === 1 ? 'layout' : 'finishing';
+    if (script && phase === lastProgressPhase && t - lastProgress < 100) return;
+    if (!script && phase === lastProgressPhase) return;
+    lastProgress = t;
+    lastProgressPhase = phase;
+    var loaded = 0;
+    var waiting = 0;
+    for (var i = 0; i < scripts.length; i++) {
+      var s = scripts[i];
+      if (s.loaded) {
+        loaded += s.visible;
+      } else if (s === script || s.phase !== -1 || s.builder || !viewport ||
+          !s.hasPosition || scriptDistance(s, viewport) <= maxDist) {
+        waiting += s.visible;
+      }
+    }
+    var total = loaded + waiting;
+    var completed = loaded + (script ? Math.round(scriptFraction(script) * script.visible) : 0);
+    callbacks.onProgress({
+      phase: phase,
+      completed: Math.min(completed, total),
+      total: total,
+      failures: failures
+    });
   };
 
   // The nearest script that wants loading, or null if nothing near does.
@@ -1136,20 +1238,12 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     var topBlock = script.topBlock;
     try {
       if (script.phase === finalPhase) {
-        var svgRoot = topBlock.getSvgRoot();
-        if (svgRoot && staging && svgRoot.parentNode === staging) {
-          canvas.appendChild(svgRoot);
-        }
         topBlock.setConnectionsHidden(false);
         topBlock.updateDisabled();
         if (workspace.restoreGlows) {
           // It may have been running the whole time it was unloaded.
           workspace.restoreGlows(topBlock);
         }
-        if (svgRoot) {
-          svgRoot.style.visibility = '';
-        }
-        Blockly.Xml.restoreFrameVisibility_(workspace, topBlock);
       } else {
         var block = script.blocks[script.blockIndex];
         if (block && block.workspace) {
@@ -1174,9 +1268,10 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
         script.width = measured.width;
         script.height = measured.height;
       }
-      removePlaceholder(script);
       script.loaded = true;
       script.lastNear = now();
+      pendingReveal.push(script);
+      pendingRevealBlocks += script.visible;
       markChanged();
     } else if (deferredConnections && script.phase === 2) {
       if (++script.blockIndex >= script.blocks.length) script.phase++;
@@ -1196,6 +1291,7 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
   // Load whatever is near the viewport, a frame's worth at a time.
   processFrame = function(frameTime) {
     scheduled = false;
+    scheduledUrgent = false;
     if (cancelled) {
       return;
     }
@@ -1219,8 +1315,11 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
         (Blockly.WidgetDiv && Blockly.WidgetDiv.isVisible())) {
       // Materializing blocks mid-drag would move connections out from under
       // the drag. Panning the workspace is fine, so only block drags pause.
-      var waiting = pickScript(getViewport(), Infinity);
-      reportProgress(waiting && waiting.script, true);
+      var pausedViewport = getViewport();
+      var waiting = pickScript(pausedViewport, Infinity);
+      flushReveals(false);
+      reportProgress(waiting && waiting.script, true, pausedViewport,
+          pausedViewport ? loadDistance(pausedViewport) : Infinity);
       wake();
       return;
     }
@@ -1232,7 +1331,7 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
         stepUnload(scripts[u]);
         if (now() >= disposalDeadline) {
           busyLastFrame = true;
-          wake();
+          wake(!panning);
           return;
         }
       }
@@ -1263,13 +1362,14 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
         }
         deadline = Math.max(deadline, start + Blockly.Xml.DEFERRED_RENDER_MIN_BUDGET_MS);
       }
-      while (pick && now() < deadline) {
+      while (pick && now() < deadline && !inputPending()) {
         stepScript(pick.script);
         if (pick.script.loaded || pick.script.failed) {
           pick = pickScript(viewport, maxDist);
         }
       }
     }
+    flushReveals(!pick);
     if (boundsDirty) {
       updateBounds();
       // resizeContents() measures every block, so don't do it every frame, and
@@ -1284,8 +1384,8 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     }
     if (pick) {
       busyLastFrame = true;
-      reportProgress(pick.script, false);
-      wake();
+      reportProgress(pick.script, false, viewport, maxDist);
+      wake(!panning);
       return;
     }
     settle(panning);
@@ -1295,6 +1395,7 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
   // every frame, so an idle wake has to stay cheap: the scrollbars and
   // visibility only need refreshing after something loaded or unloaded.
   settle = function(opt_panning) {
+    flushReveals(true);
     workspace.deferredRenderActive = false;
     if (cacheOpen) {
       cacheOpen = false;
@@ -1320,7 +1421,7 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
         }
       }
     }
-    reportProgress(null, false);
+    reportProgress(null, false, null, Infinity);
     if (!announcedDone) {
       announcedDone = true;
       if (workspace.refreshToolboxSelection_) {
@@ -1519,6 +1620,7 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     } finally {
       Blockly.Field.stopCache();
     }
+    flushReveals(true);
     updateBounds();
     if (workspace.rendered) {
       workspace.resizeContents();
@@ -1546,6 +1648,13 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
   updateBounds();
 
   var teardown = function() {
+    flushReveals(true);
+    if (channel) {
+      channelCallback = null;
+      channel.port1.close();
+      channel.port2.close();
+      channel = null;
+    }
     workspace.deferredRenderActive = false;
     workspace.deferredContentBounds_ = null;
     workspace.deferredRenderHandle_ = null;
