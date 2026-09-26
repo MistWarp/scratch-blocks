@@ -485,6 +485,13 @@ Blockly.Gesture.prototype.doStart = function(e) {
     this.cancel();
     return;
   }
+  var viewWorkspace = this.creatorWorkspace_;
+  if (viewWorkspace && viewWorkspace.targetWorkspace) {
+    viewWorkspace = viewWorkspace.targetWorkspace;
+  }
+  if (viewWorkspace && viewWorkspace.commitViewPreview_) {
+    viewWorkspace.commitViewPreview_();
+  }
   this.hasStarted_ = true;
 
   Blockly.BlockAnimations.disconnectUiStop();
