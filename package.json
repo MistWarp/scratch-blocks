@@ -12,7 +12,6 @@
   "main": "./dist/vertical.js",
   "browser": "./shim/vertical.js",
   "scripts": {
-    "deploy": "npm run build:playground && rimraf gh-pages/closure-library/scripts/ci/CloseAdobeDialog.exe && gh-pages -t -d gh-pages -m \"Build for $(git log --pretty=format:%H -n1)\"",
     "prepare": "webpack",
     "build:closure": "node universal-python.js build.py",
     "build:playground": "BUILD_PLAYGROUND=1 webpack",
@@ -36,7 +35,6 @@
     "copy-webpack-plugin": "4.6.0",
     "eslint": "4.19.1",
     "event-stream": "3.3.5",
-    "gh-pages": "0.12.0",
     "glob": "7.2.3",
     "google-closure-compiler": "20180402.0.0",
     "google-closure-library": "20190301.0.0",
