@@ -578,7 +578,7 @@ Blockly.WorkspaceSvg.prototype.dispose = function() {
   if (!this.options.parentWorkspace) {
     // Top-most workspace.  Dispose of the div that the
     // SVG is injected into (i.e. injectionDiv).
-    goog.dom.removeNode(this.getParentSvg().parentNode);
+    goog.dom.removeNode(this.getInjectionDiv());
   }
   if (this.resizeHandlerWrapper_) {
     Blockly.unbindEvent_(this.resizeHandlerWrapper_);
@@ -1540,13 +1540,27 @@ Blockly.WorkspaceSvg.prototype.onMouseWheel_ = function(e) {
   // See LLK/scratch-blocks#1190.
   var multiplier = e.deltaMode === 0x1 ? Blockly.LINE_SCROLL_MULTIPLIER : 1;
 
+  var pending = this.pendingWheel_;
+  if (!pending) {
+    pending = this.pendingWheel_ = {zoom: 0, x: 0, y: 0, dx: 0, dy: 0};
+    var workspace = this;
+    var flush = function() {
+      workspace.flushWheel_();
+    };
+    if (typeof requestAnimationFrame == 'function') {
+      requestAnimationFrame(flush);
+    } else {
+      setTimeout(flush, 0);
+    }
+  }
   if (e.ctrlKey) {
     // The vertical scroll distance that corresponds to a click of a zoom button.
     var PIXELS_PER_ZOOM_STEP = 50;
-    var delta = -e.deltaY / PIXELS_PER_ZOOM_STEP * multiplier;
+    pending.zoom += -e.deltaY / PIXELS_PER_ZOOM_STEP * multiplier;
     var position = Blockly.utils.mouseToSvg(e, this.getParentSvg(),
         this.getInverseScreenCTM());
-    this.zoom(position.x, position.y, delta);
+    pending.x = position.x;
+    pending.y = position.y;
   } else {
     // This is a regular mouse wheel event - scroll the workspace
     // First hide the WidgetDiv without animation
@@ -1554,21 +1568,40 @@ Blockly.WorkspaceSvg.prototype.onMouseWheel_ = function(e) {
     Blockly.WidgetDiv.hide(true);
     Blockly.DropDownDiv.hideWithoutAnimation();
 
-    var x = this.scrollX - e.deltaX * multiplier;
-    var y = this.scrollY - e.deltaY * multiplier;
-
+    var dx = e.deltaX * multiplier;
+    var dy = e.deltaY * multiplier;
     if (e.shiftKey && e.deltaX === 0) {
       // Scroll horizontally (based on vertical scroll delta)
       // This is needed as for some browser/system combinations which do not
       // set deltaX. See #1662.
-      x = this.scrollX - e.deltaY * multiplier;
-      y = this.scrollY; // Don't scroll vertically
+      dx = dy;
+      dy = 0;
     }
-
-    this.startDragMetrics = this.getMetrics();
-    this.scroll(x, y);
+    pending.dx += dx;
+    pending.dy += dy;
   }
   e.preventDefault();
+};
+
+/**
+ * Apply the wheel events received since the last animation frame as one
+ * scroll and one zoom. Every commit relays out and repaints the workspace, so
+ * a burst of wheel events costs one commit per frame instead of one per event.
+ * @private
+ */
+Blockly.WorkspaceSvg.prototype.flushWheel_ = function() {
+  var pending = this.pendingWheel_;
+  this.pendingWheel_ = null;
+  if (!pending || !this.rendered || !this.svgBlockCanvas_) {
+    return;
+  }
+  if (pending.dx || pending.dy) {
+    this.startDragMetrics = this.getMetrics();
+    this.scroll(this.scrollX - pending.dx, this.scrollY - pending.dy);
+  }
+  if (pending.zoom) {
+    this.zoom(pending.x, pending.y, pending.zoom);
+  }
 };
 
 /**
@@ -1978,11 +2011,11 @@ Blockly.WorkspaceSvg.prototype.setBrowserFocus = function() {
     try {
       // In IE11, use setActive (which is IE only) so the page doesn't scroll
       // to the workspace gaining focus.
-      this.getParentSvg().parentNode.setActive();
+      this.getInjectionDiv().setActive();
     } catch (e) {
       // setActive support was discontinued in Edge so when that fails, call
       // focus instead.
-      this.getParentSvg().parentNode.focus();
+      this.getInjectionDiv().focus();
     }
   }
 };
