@@ -108,16 +108,13 @@ Blockly.createDom_ = function(container, options) {
     ...
   </svg>
   */
-  var host = document.createElement('div');
-  host.className = 'blocklyWorkspaceHost';
-  container.appendChild(host);
   var svg = Blockly.utils.createSvgElement('svg', {
     'xmlns': 'http://www.w3.org/2000/svg',
     'xmlns:html': 'http://www.w3.org/1999/xhtml',
     'xmlns:xlink': 'http://www.w3.org/1999/xlink',
     'version': '1.1',
     'class': 'blocklySvg'
-  }, host);
+  }, container);
   /*
   <defs>
     ... filters go here ...
@@ -285,7 +282,7 @@ Blockly.createMainWorkspace_ = function(svg, options, blockDragSurface, workspac
   if (!options.hasCategories && options.languageTree) {
     // Add flyout as an <svg> that is a sibling of the workspace svg.
     var flyout = mainWorkspace.addFlyout_('svg');
-    Blockly.utils.insertAfter(flyout, Blockly.utils.getSvgHost(svg));
+    Blockly.utils.insertAfter(flyout, svg);
   }
 
   // A null translation will also apply the correct initial scale.
@@ -356,15 +353,14 @@ Blockly.createMainWorkspace_ = function(svg, options, blockDragSurface, workspac
 Blockly.init_ = function(mainWorkspace) {
   var options = mainWorkspace.options;
   var svg = mainWorkspace.getParentSvg();
-  var injectionDiv = mainWorkspace.getInjectionDiv();
 
   // This fixes wheel events in Safari.
   // This makes no sense, but it really does work.
   // https://bugs.webkit.org/show_bug.cgi?id=226683#c4
-  injectionDiv.addEventListener('wheel', function() {});
+  svg.parentNode.addEventListener('wheel', function() {});
 
   // Suppress the browser's context menu.
-  Blockly.bindEventWithChecks_(injectionDiv, 'contextmenu', null,
+  Blockly.bindEventWithChecks_(svg.parentNode, 'contextmenu', null,
       function(e) {
         if (!Blockly.utils.isTargetInput(e)) {
           e.preventDefault();

@@ -734,23 +734,6 @@ Blockly.utils.is3dSupported = function() {
  * @param {!Element} refNode Existing element to precede new node.
  * @package
  */
-/**
- * The element that hosts a workspace's parent SVG inside the injection div, or
- * the SVG itself when it is not hosted. Siblings of the workspace (flyout,
- * scrollbars) go next to the host so a transform on it moves only the
- * workspace.
- * @param {!Element} svg A workspace's parent SVG.
- * @return {!Element} The host element or the SVG.
- */
-Blockly.utils.getSvgHost = function(svg) {
-  var parent = svg.parentNode;
-  if (parent && parent.nodeType == 1 &&
-      Blockly.utils.hasClass(/** @type {!Element} */ (parent), 'blocklyWorkspaceHost')) {
-    return /** @type {!Element} */ (parent);
-  }
-  return svg;
-};
-
 Blockly.utils.insertAfter = function(newNode, refNode) {
   var siblingNode = refNode.nextSibling;
   var parentNode = refNode.parentNode;
