@@ -243,6 +243,9 @@ Blockly.BlockDragger.initIconData_ = function(block) {
  * @package
  */
 Blockly.BlockDragger.prototype.startBlockDrag = function(currentDragDeltaXY) {
+  if (this.workspace_.intersectionObserver) {
+    this.workspace_.intersectionObserver.uncull(this.draggingBlock_);
+  }
   if (!Blockly.Events.getGroup()) {
     Blockly.Events.setGroup(true);
   }
