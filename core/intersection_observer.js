@@ -52,6 +52,114 @@ Blockly.IntersectionObserver.prototype.markDirty = function(block) {
  * Stop observing everything at once. Disposing blocks one at a time would be
  * quadratic, so workspace.clear() calls this instead.
  */
+/**
+ * Blocks of a visible script that lie further than this many viewports from the
+ * view draw nothing of their own. Their groups stay in the tree so the blocks
+ * inside and after them keep their positions.
+ */
+Blockly.IntersectionObserver.CULL_MARGIN = 0.5;
+
+/**
+ * Whether within-script culling is on. Off leaves every block of a visible
+ * script drawn.
+ */
+Blockly.IntersectionObserver.CULL_ENABLED = true;
+
+/**
+ * Hide or show what a block draws of itself: its path, fields and icons, but
+ * not the blocks inside it or after it, which have their own state. Inline
+ * styles keep the change local to those elements; hiding a block's whole group
+ * would detach and reattach everything nested in it each time the edge of the
+ * view passed it.
+ * @param {!Blockly.BlockSvg} block The block.
+ * @param {boolean} hidden Whether to hide the block's own drawing.
+ * @private
+ */
+Blockly.IntersectionObserver.prototype.setOwnHidden_ = function(block, hidden) {
+  var root = block.getSvgRoot();
+  if (!root) {
+    return;
+  }
+  block.culledOwn_ = hidden;
+  for (var child = root.firstElementChild; child; child = child.nextElementSibling) {
+    if (child.hasAttribute('data-id')) {
+      continue;
+    }
+    if (hidden) {
+      if (child.culledDisplay_ === undefined) {
+        child.culledDisplay_ = child.style.display;
+        child.style.display = 'none';
+      }
+    } else if (child.culledDisplay_ !== undefined) {
+      child.style.display = child.culledDisplay_;
+      child.culledDisplay_ = undefined;
+    }
+  }
+};
+
+/**
+ * Show every block of a script again, including any outside the view. Call
+ * before a script is dragged, exported or otherwise needed whole.
+ * @param {!Blockly.BlockSvg} block Root of the subtree to show.
+ */
+Blockly.IntersectionObserver.prototype.uncull = function(block) {
+  var stack = [block];
+  while (stack.length) {
+    var current = stack.pop();
+    if (current.culledOwn_) {
+      this.setOwnHidden_(current, false);
+    }
+    var children = current.childBlocks_;
+    for (var i = 0; children && i < children.length; i++) {
+      stack.push(children[i]);
+    }
+  }
+};
+
+/**
+ * Show every block on the workspace again.
+ */
+Blockly.IntersectionObserver.prototype.uncullAll = function() {
+  for (var i = 0; i < this.observing.length; i++) {
+    this.uncull(this.observing[i]);
+  }
+};
+
+/**
+ * Hide the drawing of every block of a visible script that is outside the view.
+ * @param {!Blockly.BlockSvg} top The script's top block.
+ * @param {!Object} view Visible area in workspace units, with the margin.
+ * @private
+ */
+Blockly.IntersectionObserver.prototype.cullStack_ = function(top, view) {
+  var origin = top.getRelativeToSurfaceXY();
+  var stack = [{block: top, x: origin.x, y: origin.y}];
+  while (stack.length) {
+    var item = stack.pop();
+    var block = item.block;
+    if (!block.rendered) {
+      continue;
+    }
+    var x = item.x;
+    var y = item.y;
+    var outside = y > view.bottom || x > view.right ||
+        y + block.height < view.top || x + block.width < view.left;
+    if (outside !== !!block.culledOwn_) {
+      this.setOwnHidden_(block, outside);
+    }
+    var children = block.childBlocks_;
+    for (var i = 0; children && i < children.length; i++) {
+      var child = children[i];
+      var childRoot = child.getSvgRoot();
+      if (!childRoot) {
+        continue;
+      }
+      var xy = Blockly.utils.getRelativeXY(childRoot);
+      stack.push({block: child, x: x + xy.x, y: y + xy.y});
+    }
+  }
+};
+
 Blockly.IntersectionObserver.prototype.unobserveAll = function() {
   for (var i = 0; i < this.observing.length; i++) {
     this.observing[i].intersectionObserved_ = false;
@@ -123,6 +231,21 @@ Blockly.IntersectionObserver.prototype.checkForIntersections = function() {
   // Allow blocks to go slightly offscreen so that effects such as glow do not get cut off.
   var margin = 12 * workspaceScale;
 
+  var cullView = null;
+  if (Blockly.IntersectionObserver.CULL_ENABLED && !RTL && workspaceScale > 0) {
+    var viewLeft = -canvasPos.x / workspaceScale;
+    var viewTop = -canvasPos.y / workspaceScale;
+    var viewWidth = workspaceWidth / workspaceScale;
+    var viewHeight = workspaceHeight / workspaceScale;
+    var cullMargin = Blockly.IntersectionObserver.CULL_MARGIN;
+    cullView = {
+      left: viewLeft - viewWidth * cullMargin,
+      top: viewTop - viewHeight * cullMargin,
+      right: viewLeft + viewWidth * (1 + cullMargin),
+      bottom: viewTop + viewHeight * (1 + cullMargin)
+    };
+  }
+
   for (var i = 0; i < blocks.length; i++) {
     var block = blocks[i];
     if (!block.intersectionObserved_ || !block.rendered) {
@@ -152,5 +275,8 @@ Blockly.IntersectionObserver.prototype.checkForIntersections = function() {
     }
 
     block.setIntersects(visible);
+    if (visible && cullView) {
+      this.cullStack_(block, cullView);
+    }
   }
 };

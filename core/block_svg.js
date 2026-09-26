@@ -346,6 +346,9 @@ Blockly.BlockSvg.prototype.setParent = function(newParent) {
     return;
   }
 
+  if (!newParent && this.workspace.intersectionObserver) {
+    this.workspace.intersectionObserver.uncull(this);
+  }
   this.updateIntersectionObserver();
 
   var oldXY = this.getRelativeToSurfaceXY();
