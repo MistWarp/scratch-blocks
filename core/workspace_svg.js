@@ -521,10 +521,6 @@ Blockly.WorkspaceSvg.prototype.createDom = function(opt_backgroundClass) {
  * Unlink from all DOM elements to prevent memory leaks.
  */
 Blockly.WorkspaceSvg.prototype.dispose = function() {
-  if (this.viewPreview_) {
-    clearTimeout(this.viewPreview_.timer);
-    this.viewPreview_ = null;
-  }
   // Stop rerendering.
   this.rendered = false;
   this.cancelDeferredRender();
@@ -855,7 +851,6 @@ Blockly.WorkspaceSvg.prototype.enableProcedureReturns = function() {
  * trash, zoom, toolbox, etc. (e.g. window resize).
  */
 Blockly.WorkspaceSvg.prototype.resize = function() {
-  this.commitViewPreview_();
   if (this.toolbox_) {
     this.toolbox_.position();
   }
@@ -1600,10 +1595,6 @@ Blockly.WorkspaceSvg.prototype.flushWheel_ = function() {
   if (!pending || !this.rendered || !this.svgBlockCanvas_) {
     return;
   }
-  if (this.viewPreview_ || this.canPreviewView_()) {
-    this.previewView_(pending.zoom, pending.x, pending.y, pending.dx, pending.dy);
-    return;
-  }
   if (pending.dx || pending.dy) {
     this.startDragMetrics = this.getMetrics();
     this.scroll(this.scrollX - pending.dx, this.scrollY - pending.dy);
@@ -1611,136 +1602,6 @@ Blockly.WorkspaceSvg.prototype.flushWheel_ = function() {
   if (pending.zoom) {
     this.zoom(pending.x, pending.y, pending.zoom);
   }
-};
-
-/**
- * Workspaces with at least this many rendered blocks preview wheel zooms and
- * scrolls with a compositor transform and commit them once the wheel stops.
- * Committing relays out and repaints every block, which for a large workspace
- * takes far longer than a frame; the preview costs the browser only a
- * compositing update.
- */
-Blockly.WorkspaceSvg.VIEW_PREVIEW_MIN_BLOCKS = 1000;
-
-/**
- * How long after the last wheel event a previewed view is committed.
- */
-Blockly.WorkspaceSvg.VIEW_PREVIEW_SETTLE_MS = 150;
-
-/**
- * @return {boolean} Whether wheel zooms and scrolls should be previewed.
- * @private
- */
-Blockly.WorkspaceSvg.prototype.canPreviewView_ = function() {
-  return this.rendered && !!this.scrollbar && !this.currentGesture_ &&
-      !this.isDragSurfaceActive_ && typeof requestAnimationFrame == 'function' &&
-      Blockly.utils.getSvgHost(this.getParentSvg()) !== this.getParentSvg() &&
-      Object.keys(this.blockDB_).length >= Blockly.WorkspaceSvg.VIEW_PREVIEW_MIN_BLOCKS;
-};
-
-/**
- * Add a zoom about a point and a scroll to the previewed view. The preview is
- * an affine transform (uniform scale a and translation t) in parent SVG
- * pixels, applied as a CSS transform to the element hosting the SVG. A
- * transform on an HTML ancestor does not lay the SVG out again; one on the SVG
- * itself does.
- * @param {number} zoomAmount Zoom steps, as passed to zoom().
- * @param {number} x X of the zoom centre, in parent SVG pixels.
- * @param {number} y Y of the zoom centre, in parent SVG pixels.
- * @param {number} dx Horizontal scroll delta in pixels.
- * @param {number} dy Vertical scroll delta in pixels.
- * @private
- */
-Blockly.WorkspaceSvg.prototype.previewView_ = function(zoomAmount, x, y, dx, dy) {
-  var preview = this.viewPreview_;
-  var host = Blockly.utils.getSvgHost(this.getParentSvg());
-  if (!preview) {
-    var hostRect = host.getBoundingClientRect();
-    var svgRect = this.getParentSvg().getBoundingClientRect();
-    preview = this.viewPreview_ = {
-      a: 1,
-      tx: 0,
-      ty: 0,
-      offsetX: svgRect.left - hostRect.left,
-      offsetY: svgRect.top - hostRect.top,
-      metrics: this.getMetrics(),
-      transform: host.style.transform,
-      timer: null
-    };
-    Blockly.WidgetDiv.hide(true);
-    Blockly.DropDownDiv.hideWithoutAnimation();
-  }
-  var opts = this.options.zoomOptions;
-  if (zoomAmount) {
-    var k = Math.pow(opts.scaleSpeed, zoomAmount);
-    var target = this.scale * preview.a * k;
-    if (opts.maxScale && target > opts.maxScale) {
-      k = opts.maxScale / (this.scale * preview.a);
-    } else if (opts.minScale && target < opts.minScale) {
-      k = opts.minScale / (this.scale * preview.a);
-    }
-    preview.tx = k * preview.tx + (1 - k) * x;
-    preview.ty = k * preview.ty + (1 - k) * y;
-    preview.a *= k;
-  }
-  if (dx || dy) {
-    var tx = preview.tx - dx;
-    var ty = preview.ty - dy;
-    if (preview.a === 1) {
-      var m = preview.metrics;
-      var sx = Math.max(Math.min(this.scrollX + tx, -m.contentLeft),
-          m.viewWidth - m.contentLeft - m.contentWidth);
-      var sy = Math.max(Math.min(this.scrollY + ty, -m.contentTop),
-          m.viewHeight - m.contentTop - m.contentHeight);
-      tx = sx - this.scrollX;
-      ty = sy - this.scrollY;
-    }
-    preview.tx = tx;
-    preview.ty = ty;
-  }
-  var a = preview.a;
-  host.style.transform = 'matrix(' + a + ',0,0,' + a + ',' +
-      (preview.tx + (1 - a) * preview.offsetX) + ',' +
-      (preview.ty + (1 - a) * preview.offsetY) + ')';
-  if (preview.timer !== null) {
-    clearTimeout(preview.timer);
-  }
-  var workspace = this;
-  preview.timer = setTimeout(function() {
-    workspace.commitViewPreview_();
-  }, Blockly.WorkspaceSvg.VIEW_PREVIEW_SETTLE_MS);
-};
-
-/**
- * Apply the previewed view for real, as one scroll or one zoom.
- * @private
- */
-Blockly.WorkspaceSvg.prototype.commitViewPreview_ = function() {
-  var preview = this.viewPreview_;
-  if (!preview) {
-    return;
-  }
-  this.viewPreview_ = null;
-  if (preview.timer !== null) {
-    clearTimeout(preview.timer);
-  }
-  var svg = this.getParentSvg();
-  if (svg) {
-    Blockly.utils.getSvgHost(svg).style.transform = preview.transform;
-  }
-  if (!this.rendered || !this.svgBlockCanvas_) {
-    return;
-  }
-  var a = preview.a;
-  if (Math.abs(a - 1) < 1e-9) {
-    if (preview.tx || preview.ty) {
-      this.startDragMetrics = preview.metrics;
-      this.scroll(this.scrollX + preview.tx, this.scrollY + preview.ty);
-    }
-    return;
-  }
-  this.zoom(preview.tx / (1 - a), preview.ty / (1 - a),
-      Math.log(a) / Math.log(this.options.zoomOptions.scaleSpeed));
 };
 
 /**
@@ -2167,7 +2028,6 @@ Blockly.WorkspaceSvg.prototype.setBrowserFocus = function() {
  *                        (negative zooms out and positive zooms in).
  */
 Blockly.WorkspaceSvg.prototype.zoom = function(x, y, amount) {
-  this.commitViewPreview_();
   var speed = this.options.zoomOptions.scaleSpeed;
   var metrics = this.getMetrics();
   var center = this.getParentSvg().createSVGPoint();
@@ -2212,10 +2072,6 @@ Blockly.WorkspaceSvg.prototype.zoomCenter = function(type) {
   var metrics = this.getMetrics();
   var x = metrics.viewWidth / 2;
   var y = metrics.viewHeight / 2;
-  if (this.viewPreview_ || this.canPreviewView_()) {
-    this.previewView_(type, x, y, 0, 0);
-    return;
-  }
   this.zoom(x, y, type);
 };
 
@@ -2359,7 +2215,6 @@ Blockly.WorkspaceSvg.prototype.setScale = function(newScale) {
  * @param {number} y Target Y to scroll to
  */
 Blockly.WorkspaceSvg.prototype.scroll = function(x, y) {
-  this.commitViewPreview_();
   var metrics = this.startDragMetrics; // Cached values
   x = Math.min(x, -metrics.contentLeft);
   y = Math.min(y, -metrics.contentTop);
@@ -2590,9 +2445,6 @@ Blockly.WorkspaceSvg.getTopLevelWorkspaceMetrics_ = function() {
  * @this Blockly.WorkspaceSvg
  */
 Blockly.WorkspaceSvg.setTopLevelWorkspaceMetrics_ = function(xyRatio) {
-  if (this.commitViewPreview_) {
-    this.commitViewPreview_();
-  }
   if (!this.scrollbar) {
     throw 'Attempt to set top level workspace scroll without scrollbars.';
   }
