@@ -625,8 +625,7 @@ Blockly.Scrollbar.prototype.createDom_ = function(opt_class) {
         'ry': radius
       },
       this.svgGroup_);
-  Blockly.utils.insertAfter(this.outerSvg_,
-      Blockly.utils.getSvgHost(this.workspace_.getParentSvg()));
+  Blockly.utils.insertAfter(this.outerSvg_, this.workspace_.getParentSvg());
 };
 
 /**
