@@ -1267,6 +1267,10 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
         var measured = topBlock.getHeightWidth();
         script.width = measured.width;
         script.height = measured.height;
+        if (workspace.intersectionObserver) {
+          workspace.intersectionObserver.markDirty(topBlock);
+          workspace.queueIntersectionCheck();
+        }
       }
       script.loaded = true;
       script.lastNear = now();
