@@ -114,8 +114,7 @@ Blockly.Toolbox.prototype.init = function() {
   this.HtmlDiv =
       goog.dom.createDom(goog.dom.TagName.DIV, 'blocklyToolboxDiv');
   this.HtmlDiv.setAttribute('dir', workspace.RTL ? 'RTL' : 'LTR');
-  var host = Blockly.utils.getSvgHost(svg);
-  host.parentNode.insertBefore(this.HtmlDiv, host);
+  svg.parentNode.insertBefore(this.HtmlDiv, svg);
 
   // Clicking on toolbox closes popups.
   Blockly.bindEventWithChecks_(this.HtmlDiv, 'mousedown', this,
@@ -175,8 +174,8 @@ Blockly.Toolbox.prototype.createFlyout_ = function() {
   }
   this.flyout_.setParentToolbox(this);
 
-  goog.dom.insertSiblingAfter(this.flyout_.createDom('svg'),
-      Blockly.utils.getSvgHost(this.workspace_.getParentSvg()));
+  goog.dom.insertSiblingAfter(
+      this.flyout_.createDom('svg'), this.workspace_.getParentSvg());
   this.flyout_.init(workspace);
 };
 

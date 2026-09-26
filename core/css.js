@@ -128,16 +128,6 @@ Blockly.Css.setCursor = function(cursor) {
  * Array making up the CSS content for Blockly.
  */
 Blockly.Css.CONTENT = [
-  '.blocklyWorkspaceHost {',
-    'position: absolute;',
-    'top: 0;',
-    'left: 0;',
-    'width: 100%;',
-    'height: 100%;',
-    'transform-origin: 0 0;',
-    'will-change: transform;',
-  '}',
-
   '.blocklySvg {',
     'background-color: $colour_workspace;',
     'outline: none;',
