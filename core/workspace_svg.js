@@ -2666,6 +2666,7 @@ Blockly.WorkspaceSvg.prototype.cancelCurrentGesture = function() {
  * @param {!Object} fakeEvent An object with the properties needed to start a
  *     drag, including clientX and clientY.
  * @param {!Blockly.BlockSvg} block The block to start dragging.
+ * @return {boolean} Whether a gesture was available to start the drag.
  * @package
  */
 Blockly.WorkspaceSvg.prototype.startDragWithFakeEvent = function(fakeEvent,
@@ -2673,7 +2674,9 @@ Blockly.WorkspaceSvg.prototype.startDragWithFakeEvent = function(fakeEvent,
   Blockly.Touch.clearTouchIdentifier();
   Blockly.Touch.checkTouchIdentifier(fakeEvent);
   var gesture = block.workspace.getGesture(fakeEvent);
+  if (!gesture) return false;
   gesture.forceStartBlockDrag(fakeEvent, block);
+  return true;
 };
 
 /**
