@@ -366,7 +366,10 @@ Blockly.BlockDragger.prototype.endBlockDrag = function(e, currentDragDeltaXY) {
   var isDeletingProcDef = this.wouldDeleteBlock_ &&
       (this.draggingBlock_.type == Blockly.PROCEDURES_DEFINITION_BLOCK_TYPE);
   if (isDeletingProcDef) {
-    var procCodeBeingDeleted = this.draggingBlock_.getInput('custom_block').connection.targetBlock().getProcCode();
+    var input = this.draggingBlock_.getInput('custom_block');
+    var prototypeBlock = input && input.connection && input.connection.targetBlock();
+    isDeletingProcDef = !!prototypeBlock;
+    var procCodeBeingDeleted = prototypeBlock && prototypeBlock.getProcCode();
   }
 
   var deleted = this.maybeDeleteBlock_();
