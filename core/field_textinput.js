@@ -633,7 +633,7 @@ Blockly.FieldTextInput.prototype.maybeSaveEdit_ = function() {
     }
   }
   this.setText(text);
-  this.sourceBlock_.rendered && this.sourceBlock_.render();
+  this.sourceBlock_ && this.sourceBlock_.rendered && this.sourceBlock_.render();
 };
 
 /**

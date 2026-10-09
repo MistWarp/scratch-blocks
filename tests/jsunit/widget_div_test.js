@@ -152,3 +152,23 @@ function test_widgetDiv_noXConflict_RTL() {
   assertEquals(anchorBBox.right - widgetDiv_test_widgetSize.width, calculated);
 }
 
+
+function test_widgetDiv_resizeHidesWidgetOfDisposedField() {
+  Blockly.WidgetDiv.createDom();
+  var disposedField = {
+    sourceBlock_: null,
+    getScaledBBox_: function() {
+      return this.sourceBlock_.workspace;
+    },
+    getSize: function() {
+      return widgetDiv_test_widgetSize;
+    }
+  };
+  Blockly.WidgetDiv.show(disposedField, false, null);
+  try {
+    Blockly.WidgetDiv.repositionForWindowResize();
+    assertFalse(Blockly.WidgetDiv.isVisible());
+  } finally {
+    Blockly.WidgetDiv.hide(true);
+  }
+}
