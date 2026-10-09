@@ -310,6 +310,35 @@ function test_blockMove_constructoroldParentId() {
   }
 }
 
+function test_move_runIntoShadowParentDoesNotThrow() {
+  eventTest_setUp();
+  Blockly.defineBlocksWithJsonArray([{
+    'type': 'event_test_parent',
+    'message0': '%1',
+    'args0': [{'type': 'input_value', 'name': 'IN'}]
+  },
+  {
+    'type': 'event_test_child',
+    'message0': 'child',
+    'output': null
+  }]);
+  try {
+    var parent = workspace.newBlock('event_test_parent', 'parent');
+    var child = workspace.newBlock('event_test_child', 'child');
+    parent.getInput('IN').connection.connect(child.outputConnection);
+    var event = new Blockly.Events.BlockMove(child);
+    child.unplug();
+    event.recordNew();
+    parent.setShadow(true);
+    event.run(false);
+    assertNull(child.getParent());
+  } finally {
+    delete Blockly.Blocks['event_test_parent'];
+    delete Blockly.Blocks['event_test_child'];
+    eventTest_tearDown();
+  }
+}
+
 function test_uiEvent_constructor_null() {
   try {
     Blockly.Events.setGroup('testGroup');
