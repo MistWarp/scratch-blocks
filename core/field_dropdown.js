@@ -369,12 +369,12 @@ Blockly.FieldDropdown.prototype.setValue = function(newValue) {
     // Options are tuples of human-readable text and language-neutral values.
     if (options[i][1] == newValue) {
       var content = options[i][0];
-      if (typeof content == 'object') {
+      if (content && typeof content == 'object') {
         this.imageJson_ = content;
-        this.text_ = content.alt;
+        this.text_ = content.alt == null ? '' : String(content.alt);
       } else {
         this.imageJson_ = null;
-        this.text_ = content;
+        this.text_ = content == null ? '' : String(content);
       }
       // Always rerender if either the value or the text has changed.
       this.forceRerender();
@@ -383,7 +383,7 @@ Blockly.FieldDropdown.prototype.setValue = function(newValue) {
   }
   // Value not found.  Add it, maybe it will become valid once set
   // (like variable names).
-  this.text_ = newValue;
+  this.text_ = newValue === undefined ? '' : String(newValue);
   this.forceRerender();
 };
 

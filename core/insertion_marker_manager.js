@@ -582,12 +582,13 @@ Blockly.InsertionMarkerManager.prototype.highlightBlock_ = function() {
  */
 Blockly.InsertionMarkerManager.prototype.unhighlightBlock_ = function() {
   var closest = this.closestConnection_;
-  // If there's no block in place, but we're still connecting to a value input,
-  // then we must have been highlighting an input shape.
-  if (closest.type == Blockly.INPUT_VALUE && !closest.isConnected()) {
-    this.highlightedBlock_.highlightShapeForInput(closest, false);
-  } else {
-    this.highlightedBlock_.highlightForReplacement(false);
+  var highlighted = this.highlightedBlock_;
+  if (highlighted && highlighted.workspace) {
+    if (closest && highlighted == closest.sourceBlock_) {
+      highlighted.highlightShapeForInput(closest, false);
+    } else {
+      highlighted.highlightForReplacement(false);
+    }
   }
   this.highlightedBlock_ = null;
   this.highlightingBlock_ = false;

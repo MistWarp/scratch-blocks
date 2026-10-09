@@ -586,10 +586,7 @@ Blockly.BlockSvg.prototype.highlightForReplacement = function(add) {
  */
 Blockly.BlockSvg.prototype.highlightShapeForInput = function(conn, add) {
   var input = this.getInputWithConnection(conn);
-  if (!input) {
-    throw 'No input found for the connection';
-  }
-  if (!input.outlinePath) {
+  if (!input || !input.outlinePath) {
     return;
   }
   if (add) {

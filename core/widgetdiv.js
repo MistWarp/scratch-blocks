@@ -131,11 +131,11 @@ Blockly.WidgetDiv.repositionForWindowResize = function() {
   // text input.  It is important not to close it in this case because on Android,
   // when a field is focused, the soft keyboard opens triggering a window resize
   // event and we want the widget div to stick around so users can type into it.
-  if (Blockly.WidgetDiv.owner_
-      && Blockly.WidgetDiv.owner_.getScaledBBox_
-      && Blockly.WidgetDiv.owner_.getSize) {
-    var widgetScaledBBox = Blockly.WidgetDiv.owner_.getScaledBBox_();
-    var widgetSize = Blockly.WidgetDiv.owner_.getSize();
+  var owner = Blockly.WidgetDiv.owner_;
+  if (owner && owner.getScaledBBox_ && owner.getSize &&
+      owner.sourceBlock_ && owner.sourceBlock_.workspace) {
+    var widgetScaledBBox = owner.getScaledBBox_();
+    var widgetSize = owner.getSize();
     Blockly.WidgetDiv.positionInternal_(widgetScaledBBox.left, widgetScaledBBox.top,
         widgetSize.height);
   } else {

@@ -528,7 +528,11 @@ Blockly.Events.Move.prototype.run = function(forward) {
     } else if (blockConnection.type == Blockly.PREVIOUS_STATEMENT) {
       parentConnection = parentBlock.nextConnection;
     }
-    if (parentConnection) {
+    if (parentConnection && blockConnection.canConnectWithReason_(
+        parentConnection) != Blockly.Connection.CAN_CONNECT) {
+      console.warn("Can't connect block " + this.blockId + ' to input ' +
+          inputName + ' of block ' + parentId);
+    } else if (parentConnection) {
       blockConnection.connect(parentConnection);
     } else {
       console.warn("Can't connect to non-existent input: " + inputName);
