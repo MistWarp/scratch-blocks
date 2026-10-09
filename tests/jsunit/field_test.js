@@ -139,3 +139,16 @@ function test_field_register_with_custom_field() {
   assertNotNull(field);
   assertEquals(field.getValue(), 'ok');
 }
+
+function test_dropdownWithMalformedOptionsHasStringText() {
+  var malformed = [
+    [1, 2],
+    [[undefined, 'a']],
+    [[{src: 'x.svg', width: 1, height: 1}, 'b']]
+  ];
+  malformed.forEach(function(options) {
+    var field = new Blockly.FieldDropdown(function() { return options; });
+    assertEquals('string', typeof field.getText());
+    field.dispose();
+  });
+}
