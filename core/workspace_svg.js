@@ -2515,6 +2515,13 @@ Blockly.WorkspaceSvg.prototype.clear = function() {
       }
     }
   }
+  // Take the old block SVG out of the document before disposing it. Fields
+  // and inputs each remove their own nodes on dispose, and doing that
+  // thousands of times inside the live document is most of a clear's cost.
+  var canvas = this.getCanvas();
+  if (canvas) {
+    goog.dom.removeChildren(canvas);
+  }
   Blockly.WorkspaceSvg.superClass_.clear.call(this);
   if (dbList) {
     for (var i = 0; i < dbList.length; i++) {
@@ -2524,8 +2531,8 @@ Blockly.WorkspaceSvg.prototype.clear = function() {
       }
     }
   }
-  var canvas = this.getCanvas();
   if (canvas) {
+    // Anything a dispose re-added while clearing.
     goog.dom.removeChildren(canvas);
   }
   this.setResizesEnabled(true);

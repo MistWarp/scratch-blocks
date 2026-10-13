@@ -467,6 +467,11 @@ Blockly.Flyout.prototype.hide = function() {
  *     Variables and procedures have a custom set of blocks.
  */
 Blockly.Flyout.prototype.show = function(xmlList) {
+  if (this.targetWorkspace_) {
+    // Lets a deferred load tell whether the flyout was rebuilt after it began.
+    this.targetWorkspace_.flyoutShowCount_ =
+        (this.targetWorkspace_.flyoutShowCount_ || 0) + 1;
+  }
   this.workspace_.setResizesEnabled(false);
   this.hide();
   this.clearOldBlocks_();

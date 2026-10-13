@@ -341,9 +341,13 @@ Blockly.RenderedConnection.prototype.disconnectInternal_ = function(parentBlock,
  */
 Blockly.RenderedConnection.prototype.respawnShadow_ = function() {
   var parentBlock = this.getSourceBlock();
+  // A disposed parent has no workspace; don't build shadow DOM for it.
+  if (!parentBlock.workspace || !Blockly.Events.recordUndo) {
+    return;
+  }
   // Respawn the shadow block if there is one.
   var shadow = this.getShadowDom();
-  if (parentBlock.workspace && shadow && Blockly.Events.recordUndo) {
+  if (shadow) {
     Blockly.RenderedConnection.superClass_.respawnShadow_.call(this);
     var blockShadow = this.targetBlock();
     if (!blockShadow) {

@@ -49,6 +49,12 @@ function deferredXmlTest(run) {
     }
     assertEquals('Idle workspaces must stop requesting frames', 0, frames.length);
   };
+  // Run only the frames requested so far.
+  flush.step = function() {
+    var batch = frames;
+    frames = [];
+    batch.forEach(function(callback) { callback(); });
+  };
   Blockly.Events.disable();
   try {
     run(ws, ctx, view, flush, clock);
@@ -308,20 +314,110 @@ function test_dragInsertKeepsStackInPlaceAndAttachesOnRelease() {
 
 function test_asyncWorkspaceClearCancellationUsesNewestTarget() {
   deferredXmlTest(function(ws, ctx, view, flush) {
-    for (var i = 0; i < 120; i++) ws.newBlock('deferred_test', 'old' + i);
-    var obsolete = 0;
-    var first = Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(
-        Blockly.Xml.textToDom('<xml/>'), ws, {onDone: function() { obsolete++; }}, ctx);
-    assertEquals('Clearing yields before disposal', 120, ws.getAllBlocks().length);
-    first.cancel();
-    var replacement = {blocks: {newest: {id: 'newest', opcode: 'deferred_test',
-      topLevel: true, x: 10, y: 10, fields: {}, inputs: {}}}, scripts: ['newest'], comments: {}};
-    Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {}, replacement);
+    // Force the frame-by-frame clear, which normally only big workspaces use.
+    var oldMax = Blockly.Xml.SYNC_CLEAR_MAX_BLOCKS;
+    Blockly.Xml.SYNC_CLEAR_MAX_BLOCKS = 100;
+    try {
+      for (var i = 0; i < 120; i++) ws.newBlock('deferred_test', 'old' + i);
+      var obsolete = 0;
+      var first = Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(
+          Blockly.Xml.textToDom('<xml/>'), ws, {onDone: function() { obsolete++; }}, ctx);
+      assertEquals('Clearing yields before disposal', 120, ws.getAllBlocks().length);
+      first.cancel();
+      var replacement = {blocks: {newest: {id: 'newest', opcode: 'deferred_test',
+        topLevel: true, x: 10, y: 10, fields: {}, inputs: {}}}, scripts: ['newest'], comments: {}};
+      Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {}, replacement);
+      flush();
+      assertEquals(0, obsolete);
+      assertEquals(1, ws.getAllBlocks().length);
+      assertNotNull(ws.getBlockById('newest'));
+      assertNull(ws.getBlockById('near'));
+    } finally {
+      Blockly.Xml.SYNC_CLEAR_MAX_BLOCKS = oldMax;
+    }
+  });
+}
+
+function test_loadSkipsToolboxRefreshWhenFlyoutWasRebuilt() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    var oldRefresh = ws.refreshToolboxSelection_;
+    var refreshes = 0;
+    ws.refreshToolboxSelection_ = function() { refreshes++; };
+    try {
+      // Only count refreshes from the load finishing, not from re-enabling
+      // toolbox refresh synchronously (which the GUI turns off anyway).
+      Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {}, ctx);
+      refreshes = 0;
+      flush();
+      assertEquals('Nothing rebuilt the flyout, so the load refreshes it', 1, refreshes);
+
+      Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {}, ctx);
+      refreshes = 0;
+      // The GUI rebuilds the toolbox for the new sprite mid-load.
+      ws.flyoutShowCount_ = (ws.flyoutShowCount_ || 0) + 1;
+      flush();
+      assertEquals('A flyout rebuilt during the load is already current', 0, refreshes);
+    } finally {
+      ws.refreshToolboxSelection_ = oldRefresh;
+    }
+  });
+}
+
+function test_clearDoesNotRespawnShadowsOfDisposedBlocks() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {}, ctx);
     flush();
-    assertEquals(0, obsolete);
-    assertEquals(1, ws.getAllBlocks().length);
-    assertNotNull(ws.getBlockById('newest'));
-    assertNull(ws.getBlockById('near'));
+    var created = 0;
+    var oldDomToBlock = Blockly.Xml.domToBlock;
+    Blockly.Xml.domToBlock = function() {
+      created++;
+      return oldDomToBlock.apply(this, arguments);
+    };
+    try {
+      ws.clear();
+    } finally {
+      Blockly.Xml.domToBlock = oldDomToBlock;
+    }
+    assertEquals(0, created);
+    assertEquals(0, ws.getAllBlocks().length);
+    assertEquals(0, ws.getCanvas().childNodes.length);
+  });
+}
+
+function test_smallWorkspaceClearsWithoutWaitingForFrames() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    for (var i = 0; i < 120; i++) ws.newBlock('deferred_test', 'old' + i);
+    var done = 0;
+    Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(
+        Blockly.Xml.textToDom('<xml/>'), ws, {onDone: function() { done++; }}, ctx);
+    assertNull('Old blocks are gone before the first frame', ws.getBlockById('old0'));
+    assertEquals('Canvas stays visible', '', ws.getCanvas().style.visibility);
+    flush();
+    assertEquals(1, done);
+    assertNull(ws.getBlockById('old119'));
+  });
+}
+
+function test_firstFrameRendersVisibleScriptsPastNormalBudget() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    var oldNow = performance.now;
+    var oldBudget = Blockly.Xml.DEFERRED_RENDER_BUDGET_MS;
+    var time = 0;
+    // Each step costs one fake millisecond, so the normal budget alone could
+    // never finish a script in one frame.
+    Blockly.Xml.DEFERRED_RENDER_BUDGET_MS = 2;
+    performance.now = function() { return time++; };
+    try {
+      Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {}, ctx);
+      flush.step();
+      var root = ws.getBlockById('near');
+      assertNotNull('The on-screen script is built in the first frame', root);
+      assertNotEquals('and shown', 'hidden', root.getSvgRoot().style.visibility);
+      flush();
+    } finally {
+      performance.now = oldNow;
+      Blockly.Xml.DEFERRED_RENDER_BUDGET_MS = oldBudget;
+    }
   });
 }
 
@@ -417,10 +513,12 @@ function test_deferredProgressReportsWorkAndCompletion() {
   deferredXmlTest(function(ws, ctx, view, flush) {
     var oldNow = performance.now;
     var oldBudget = Blockly.Xml.DEFERRED_RENDER_BUDGET_MS;
+    var oldFirst = Blockly.Xml.DEFERRED_FIRST_FRAME_BUDGET_MS;
     var time = 0;
     var updates = [];
     // Make each frame do one step so even this tiny script spans all phases.
     Blockly.Xml.DEFERRED_RENDER_BUDGET_MS = 2;
+    Blockly.Xml.DEFERRED_FIRST_FRAME_BUDGET_MS = 0;
     performance.now = function() { return time++; };
     try {
       Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {
@@ -438,6 +536,7 @@ function test_deferredProgressReportsWorkAndCompletion() {
     } finally {
       performance.now = oldNow;
       Blockly.Xml.DEFERRED_RENDER_BUDGET_MS = oldBudget;
+      Blockly.Xml.DEFERRED_FIRST_FRAME_BUDGET_MS = oldFirst;
     }
   });
 }

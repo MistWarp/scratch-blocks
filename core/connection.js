@@ -627,8 +627,13 @@ Blockly.Connection.prototype.disconnectInternal_ = function(parentBlock,
  */
 Blockly.Connection.prototype.respawnShadow_ = function() {
   var parentBlock = this.getSourceBlock();
+  // Check this first: a parent that is being disposed has no workspace, and
+  // building its shadow DOM from a lazy description would be wasted work.
+  if (!parentBlock.workspace || !Blockly.Events.recordUndo) {
+    return;
+  }
   var shadow = this.getShadowDom();
-  if (parentBlock.workspace && shadow && Blockly.Events.recordUndo) {
+  if (shadow) {
     var blockShadow =
         Blockly.Xml.domToBlock(shadow, parentBlock.workspace);
     if (blockShadow.outputConnection) {

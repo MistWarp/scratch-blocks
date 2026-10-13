@@ -534,6 +534,64 @@ Blockly.Xml.VIRTUAL_CACHE_BLOCKS = 20000;
 Blockly.Xml.VIRTUAL_SWEEP_INTERVAL_MS = 2000;
 
 /**
+ * A workspace with at most this many rendered blocks is cleared in one go.
+ * A synchronous clear costs roughly 10-15 microseconds a block, so this is
+ * about 40 ms at worst, which is less than the frame-by-frame clear spends
+ * waiting on frames for even a small sprite. Bigger workspaces still clear
+ * across frames so the page keeps responding.
+ */
+Blockly.Xml.SYNC_CLEAR_MAX_BLOCKS = 3000;
+
+/**
+ * How long the first loader frame may spend on scripts that are actually on
+ * screen. Rendering them before the first paint means switching sprites shows
+ * real scripts straight away instead of placeholders filling in over several
+ * frames.
+ */
+Blockly.Xml.DEFERRED_FIRST_FRAME_BUDGET_MS = 50;
+
+/**
+ * Record a User Timing mark, replacing any previous mark of the same name so
+ * repeated sprite switches don't grow the performance timeline forever.
+ * @param {string} name Mark name, without the prefix.
+ * @private
+ */
+Blockly.Xml.perfMark_ = function(name) {
+  if (typeof performance == 'undefined' || !performance.mark) return;
+  var full = 'blocks:' + name;
+  try {
+    if (performance.clearMarks) performance.clearMarks(full);
+    performance.mark(full);
+  } catch (e) {
+    // User Timing is a debugging aid; never let it break loading.
+  }
+};
+
+/**
+ * Record a User Timing measure between two marks made by perfMark_.
+ * @param {string} name Measure name, without the prefix.
+ * @param {string} from Start mark name, without the prefix.
+ * @param {string} to End mark name, without the prefix.
+ * @private
+ */
+Blockly.Xml.perfMeasure_ = function(name, from, to) {
+  if (typeof performance == 'undefined' || !performance.measure) return;
+  var full = 'blocks:' + name;
+  try {
+    if (performance.clearMeasures) performance.clearMeasures(full);
+    performance.measure(full, 'blocks:' + from, 'blocks:' + to);
+  } catch (e) {
+    // A missing start mark just means there is nothing to measure.
+  }
+};
+
+/** @return {number} A high resolution timestamp where available. @private */
+Blockly.Xml.now_ = function() {
+  return (typeof performance != 'undefined' && performance.now) ?
+      performance.now() : Date.now();
+};
+
+/**
  * @param {!Element} xml Workspace XML. When opt_descs is given this carries
  *     only the variables, frames and workspace comments; the blocks come from
  *     the descriptions.
@@ -545,16 +603,22 @@ Blockly.Xml.VIRTUAL_SWEEP_INTERVAL_MS = 2000;
  */
 Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred = function(xml, workspace,
     opt_callbacks, opt_descs) {
-  if (Object.keys(workspace.blockDB_ || {}).length >= 100 && workspace.rendered) {
+  Blockly.Xml.perfMark_('switch-start');
+  var existing = Object.keys(workspace.blockDB_ || {}).length;
+  if (existing > Blockly.Xml.SYNC_CLEAR_MAX_BLOCKS && workspace.rendered) {
     return Blockly.Xml.clearWorkspaceInFrames_(workspace, function() {
       return Blockly.Xml.domToWorkspaceDeferred(xml, workspace, opt_callbacks, opt_descs);
     }, opt_callbacks);
   }
+  // Small enough to clear right now. Waiting a frame or two to clear in
+  // slices costs more wall time than the clear itself.
   workspace.setResizesEnabled(false);
   workspace.setToolboxRefreshEnabled(false);
   Blockly.Events.disable();
   try {
     workspace.clear();
+    Blockly.Xml.perfMark_('clear-done');
+    Blockly.Xml.perfMeasure_('clear', 'switch-start', 'clear-done');
     return Blockly.Xml.domToWorkspaceDeferred(xml, workspace, opt_callbacks, opt_descs);
   } finally {
     Blockly.Events.enable();
@@ -611,6 +675,8 @@ Blockly.Xml.clearWorkspaceInFrames_ = function(workspace, load, callbacks) {
     Blockly.Events.disable();
     try {
       workspace.clear();
+      Blockly.Xml.perfMark_('clear-done');
+      Blockly.Xml.perfMeasure_('clear', 'switch-start', 'clear-done');
       canvas.style.visibility = visibility;
       loader = load();
     } finally {
@@ -773,6 +839,8 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
   var lastFrameTime = 0;
   var busyLastFrame = false;
   var lastViewportKey = '';
+  var firstFrame = true;
+  var flyoutShowsAtStart = workspace.flyoutShowCount_ || 0;
   var lastResize = 0;
   var lastProgress = -Infinity;
   var lastProgressPhase = null;
@@ -1366,11 +1434,29 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
         }
         deadline = Math.max(deadline, start + Blockly.Xml.DEFERRED_RENDER_MIN_BUDGET_MS);
       }
-      while (pick && now() < deadline && !inputPending()) {
+      // The first frame keeps going past the normal budget for scripts that
+      // are actually on screen, so the switch paints real scripts at once.
+      // Off-screen work still yields to the deadline and to pending input.
+      var firstDeadline = firstFrame && !panning ?
+          start + Blockly.Xml.DEFERRED_FIRST_FRAME_BUDGET_MS : 0;
+      while (pick) {
+        var t = now();
+        var onScreenFirst = pick.dist === 0 && t < firstDeadline;
+        if (!onScreenFirst && (t >= deadline || inputPending())) {
+          break;
+        }
         stepScript(pick.script);
         if (pick.script.loaded || pick.script.failed) {
           pick = pickScript(viewport, maxDist);
         }
+      }
+      if (firstFrame) {
+        firstFrame = false;
+        // A deliberately long first frame says nothing about how busy the
+        // page is, so don't let it shrink the budget for the frames after.
+        lastFrameTime = 0;
+        Blockly.Xml.perfMark_('first-frame-done');
+        Blockly.Xml.perfMeasure_('first-frame', 'switch-start', 'first-frame-done');
       }
     }
     flushReveals(!pick);
@@ -1428,7 +1514,13 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     reportProgress(null, false, null, Infinity);
     if (!announcedDone) {
       announcedDone = true;
-      if (workspace.refreshToolboxSelection_) {
+      Blockly.Xml.perfMark_('load-done');
+      Blockly.Xml.perfMeasure_('load', 'switch-start', 'load-done');
+      // The flyout lists procedures from unloaded scripts too, and variables
+      // load up front, so a flyout built after this load began is already
+      // current. Only refresh if nothing rebuilt it.
+      if (workspace.refreshToolboxSelection_ &&
+          (workspace.flyoutShowCount_ || 0) === flyoutShowsAtStart) {
         workspace.refreshToolboxSelection_();
       }
       if (callbacks.onDone) {
