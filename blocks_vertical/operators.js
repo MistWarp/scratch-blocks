@@ -139,18 +139,35 @@ Blockly.ScratchBlocks.OperatorUtils.MUTATOR_MIXIN = {
           this, 'mutation', null, oldExtra, this.mutationToDomText_()));
     }
   },
+  inEventGroup_: function(fn) {
+    var grouped = !Blockly.Events.getGroup();
+    if (grouped) {
+      Blockly.Events.setGroup(true);
+    }
+    try {
+      fn.call(this);
+    } finally {
+      if (grouped) {
+        Blockly.Events.setGroup(false);
+      }
+    }
+  },
   plus: function() {
-    var oldExtra = this.mutationToDomText_();
-    this.itemCount_++;
-    this.updateShape_(true);
-    this.fireMutationChange_(oldExtra);
+    this.inEventGroup_(function() {
+      var oldExtra = this.mutationToDomText_();
+      this.itemCount_++;
+      this.updateShape_(true);
+      this.fireMutationChange_(oldExtra);
+    });
   },
   minus: function() {
     if (this.itemCount_ <= this.minItems_) return;
-    var oldExtra = this.mutationToDomText_();
-    this.itemCount_--;
-    this.updateShape_(false);
-    this.fireMutationChange_(oldExtra);
+    this.inEventGroup_(function() {
+      var oldExtra = this.mutationToDomText_();
+      this.itemCount_--;
+      this.updateShape_(false);
+      this.fireMutationChange_(oldExtra);
+    });
   },
   addInput_: function(index, withShadow) {
     var input = this.appendValueInput(this.inputPrefix_ + index);
@@ -162,8 +179,14 @@ Blockly.ScratchBlocks.OperatorUtils.MUTATOR_MIXIN = {
     } else if (index > 1 && this.separatorLabel_) {
       input.appendField(this.separatorLabel_, 'SEP' + index);
     }
+    var removed = this.removedShadows_ && this.removedShadows_[input.name];
+    if (removed) {
+      delete this.removedShadows_[input.name];
+    }
     if (withShadow && this.shadowType_ && this.workspace && !this.isInsertionMarker()) {
       Blockly.ScratchBlocks.OperatorUtils.attachShadow_.call(this, input, this.shadowType_);
+    } else if (removed && input.connection) {
+      input.connection.setShadowDom(removed);
     }
     return input;
   },
@@ -172,6 +195,16 @@ Blockly.ScratchBlocks.OperatorUtils.MUTATOR_MIXIN = {
     var input = this.getInput(name);
     if (!input) return;
     if (input.connection) {
+      var shadowDom = input.connection.getShadowDom();
+      var current = input.connection.targetBlock();
+      if (!shadowDom && current && current.isShadow()) {
+        shadowDom = Blockly.Xml.blockToDom(current);
+      }
+      if (shadowDom) {
+        this.removedShadows_ = this.removedShadows_ || {};
+        this.removedShadows_[name] = shadowDom;
+      }
+      input.connection.setShadowDom(null);
       var child = input.connection.targetBlock();
       if (child && !child.isShadow()) {
         input.connection.disconnect();
