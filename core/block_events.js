@@ -381,6 +381,23 @@ Blockly.Events.Move = function(block) {
   }
   Blockly.Events.Move.superClass_.constructor.call(this, block);
   var location = this.currentLocation_();
+  // Only a move that will be sent says where the block left; one built while
+  // events are off (the loader placing it) must leave that for the real move.
+  if (block.loadedParent_ && Blockly.Events.isEnabled()) {
+    // A block the loader could not connect where the VM has it. The VM must
+    // detach it from there, or it ends up both in its old slot and on its own.
+    location = {parentId: block.loadedParent_.parentId,
+      inputName: block.loadedParent_.inputName || undefined};
+    block.loadedParent_ = null;
+    // The VM empties the slot; the shadow the editor already shows there must
+    // go back into it (Blockly.Events.fire sends that right after this).
+    var parent = block.workspace.getBlockById(location.parentId);
+    var input = parent && location.inputName && parent.getInput(location.inputName);
+    var shadow = input && input.connection && input.connection.targetBlock();
+    if (shadow && shadow.isShadow()) {
+      this.refillShadow_ = shadow;
+    }
+  }
   this.oldParentId = location.parentId;
   this.oldInputName = location.inputName;
   this.oldCoordinate = location.coordinate;

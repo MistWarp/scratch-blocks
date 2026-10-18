@@ -67,10 +67,10 @@ Blockly.IntersectionObserver.CULL_ENABLED = true;
 
 /**
  * Hide or show what a block draws of itself: its path, fields and icons, but
- * not the blocks inside it or after it, which have their own state. Inline
- * styles keep the change local to those elements; hiding a block's whole group
- * would detach and reattach everything nested in it each time the edge of the
- * view passed it.
+ * not the blocks inside it or after it, which have their own state. A class on
+ * each of those elements keeps the change local to them; hiding a block's
+ * whole group would detach and reattach everything nested in it each time the
+ * edge of the view passed it.
  * @param {!Blockly.BlockSvg} block The block.
  * @param {boolean} hidden Whether to hide the block's own drawing.
  * @private
@@ -85,14 +85,16 @@ Blockly.IntersectionObserver.prototype.setOwnHidden_ = function(block, hidden) {
     if (child.hasAttribute('data-id')) {
       continue;
     }
+    // A class rather than inline display, so a field hidden or shown while
+    // its block is culled (collapsing, say) keeps that change on uncull.
     if (hidden) {
-      if (child.culledDisplay_ === undefined) {
-        child.culledDisplay_ = child.style.display;
-        child.style.display = 'none';
+      if (!child.culled_) {
+        child.culled_ = true;
+        child.classList.add('blocklyCulled');
       }
-    } else if (child.culledDisplay_ !== undefined) {
-      child.style.display = child.culledDisplay_;
-      child.culledDisplay_ = undefined;
+    } else if (child.culled_) {
+      child.culled_ = false;
+      child.classList.remove('blocklyCulled');
     }
   }
 };

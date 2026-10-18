@@ -253,6 +253,44 @@ Blockly.Block.prototype.colourQuaternary = '#FF0000';
 Blockly.Block.prototype.shadowColour_ = null;
 
 /**
+ * Where the VM has this block, if the loader could not connect it there and
+ * left it loose beside its script: {parentId, inputName}, inputName null for
+ * a next connection. Cleared by the first move event sent for the block.
+ * @type {?Object}
+ * @private
+ */
+Blockly.Block.prototype.loadedParent_ = null;
+
+/**
+ * Tell the VM that loose blocks have left the parent it still has them on,
+ * where they really are now. See loadedParent_.
+ * @param {!Blockly.Workspace} workspace The workspace.
+ * @param {function(!Blockly.Block):boolean} test Which loose blocks to detach.
+ * @param {boolean=} opt_slotFilled The slot they leave is being filled, so its
+ *     shadow is not put back.
+ * @package
+ */
+Blockly.Block.detachLooseBlocks_ = function(workspace, test, opt_slotFilled) {
+  if (!workspace.hasLooseBlocks_ || !Blockly.Events.isEnabled()) {
+    return;
+  }
+  var blocks = workspace.getTopBlocks(false);
+  for (var i = 0; i < blocks.length; i++) {
+    var block = blocks[i];
+    if (block.loadedParent_ && test(block)) {
+      var move = new Blockly.Events.BlockMove(block);
+      if (opt_slotFilled) {
+        // The shadow is about to be replaced; refilling it here would merge
+        // with its own move out and keep that move off the undo stack.
+        move.refillShadow_ = null;
+      }
+      move.recordNew();
+      Blockly.Events.fire(move);
+    }
+  }
+};
+
+/**
  * Dispose of this block.
  * @param {boolean} healStack If true, then try to heal any gap by connecting
  *     the next statement with the previous statement.  Otherwise, dispose of
@@ -268,6 +306,20 @@ Blockly.Block.prototype.dispose = function(healStack) {
     this.workspace.removeChangeListener(this.onchangeWrapper_);
   }
   this.unplug(healStack);
+  if (Blockly.Events.isEnabled() && !this.workspace.isClearing) {
+    // Deleting a block deletes everything the VM has inside it, including
+    // blocks the loader left loose beside it. Detach those first; the block
+    // itself too, if it is one.
+    var ids = Object.create(null);
+    var descendants = this.getDescendants(false);
+    for (var d = 0; d < descendants.length; d++) {
+      ids[descendants[d].id] = true;
+    }
+    var self = this;
+    Blockly.Block.detachLooseBlocks_(this.workspace, function(block) {
+      return block === self || !!ids[block.loadedParent_.parentId];
+    });
+  }
   if (Blockly.Events.isEnabled()) {
     Blockly.Events.fire(new Blockly.Events.BlockDelete(this));
   }

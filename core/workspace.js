@@ -344,6 +344,14 @@ Blockly.Workspace.prototype.getAllBlocks = function(ordered) {
 };
 
 /**
+ * Whether the loader has left any block loose on this workspace (see
+ * Blockly.Block.prototype.loadedParent_).
+ * @type {boolean}
+ * @package
+ */
+Blockly.Workspace.prototype.hasLooseBlocks_ = false;
+
+/**
  * Dispose of all blocks and comments in workspace.
  */
 Blockly.Workspace.prototype.clear = function() {
@@ -352,17 +360,41 @@ Blockly.Workspace.prototype.clear = function() {
   if (!existingGroup) {
     Blockly.Events.setGroup(true);
   }
-  while (this.topBlocks_.length) {
-    this.topBlocks_[0].dispose();
-  }
-  while (this.topComments_.length) {
-    this.topComments_[this.topComments_.length - 1].dispose();
-  }
-  while (this.topFrames_.length) {
-    this.topFrames_[this.topFrames_.length - 1].dispose();
-  }
-  if (!existingGroup) {
-    Blockly.Events.setGroup(false);
+  try {
+    while (this.topBlocks_.length) {
+      var block = this.topBlocks_[0];
+      try {
+        block.dispose();
+      } catch (e) {
+        // One block that cannot be disposed must not stop the clear, or every
+        // block after it stays on the workspace. Forget all of it, so a block
+        // loaded later can take its IDs.
+        console.warn('Could not dispose a block while clearing.', e);
+        var index = this.topBlocks_.indexOf(block);
+        if (index != -1) {
+          this.topBlocks_.splice(index, 1);
+        }
+        var stack = [block];
+        while (stack.length) {
+          var current = stack.pop();
+          if (this.blockDB_[current.id] === current) {
+            delete this.blockDB_[current.id];
+          }
+          stack.push.apply(stack, current.childBlocks_ || []);
+        }
+      }
+    }
+    while (this.topComments_.length) {
+      this.topComments_[this.topComments_.length - 1].dispose();
+    }
+    while (this.topFrames_.length) {
+      this.topFrames_[this.topFrames_.length - 1].dispose();
+    }
+  } finally {
+    if (!existingGroup) {
+      Blockly.Events.setGroup(false);
+    }
+    this.isClearing = false;
   }
   this.variableMap_.clear();
   // Any block with a drop-down or WidgetDiv was disposed.

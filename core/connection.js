@@ -148,6 +148,23 @@ Blockly.Connection.prototype.connect_ = function(childConnection) {
   var parentConnection = this;
   var parentBlock = parentConnection.getSourceBlock();
   var childBlock = childConnection.getSourceBlock();
+  if (Blockly.Events.isEnabled() && parentBlock.workspace) {
+    // A block the loader left loose may still be here in the VM. Detach it
+    // there before something else takes its place.
+    var inputName = null;
+    if (parentConnection != parentBlock.nextConnection) {
+      for (var i = 0; i < parentBlock.inputList.length; i++) {
+        if (parentBlock.inputList[i].connection == parentConnection) {
+          inputName = parentBlock.inputList[i].name;
+        }
+      }
+    }
+    Blockly.Block.detachLooseBlocks_(parentBlock.workspace, function(block) {
+      return block !== childBlock &&
+          block.loadedParent_.parentId == parentBlock.id &&
+          (block.loadedParent_.inputName || null) == inputName;
+    }, true);
+  }
   var isSurroundingC = false;
   if (parentConnection == parentBlock.getFirstStatementConnection()) {
     isSurroundingC = true;

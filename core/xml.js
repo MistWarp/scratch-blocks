@@ -627,7 +627,15 @@ Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred = function(xml, workspace,
   }
 };
 
-/** Clear old scripts without a recursive, frame-blocking workspace disposal. */
+/**
+ * Clear old scripts without a recursive, frame-blocking workspace disposal.
+ * @param {!Blockly.WorkspaceSvg} workspace The workspace.
+ * @param {function():!Object} load Starts loading the new scripts and returns
+ *     the loader's handle.
+ * @param {Object=} callbacks Optional {onProgress}.
+ * @return {!Object} Handle with a cancel() method.
+ * @private
+ */
 Blockly.Xml.clearWorkspaceInFrames_ = function(workspace, load, callbacks) {
   workspace.cancelDeferredRender();
   workspace.cancelCurrentGesture();
@@ -644,29 +652,66 @@ Blockly.Xml.clearWorkspaceInFrames_ = function(workspace, load, callbacks) {
   var visibility = canvas.style.visibility;
   canvas.style.visibility = 'hidden';
   if (workspace.intersectionObserver) workspace.intersectionObserver.unobserveAll();
+  // Take every old script out of the document at once. Removing blocks one at
+  // a time from a live canvas makes the browser restyle and lay out the whole
+  // workspace every frame, which stretched clearing a big sprite to a minute.
+  // Detached, the rest of the disposal is plain JavaScript.
+  for (var i = 0; i < roots.length; i++) {
+    var svg = roots[i].getSvgRoot && roots[i].getSvgRoot();
+    if (svg && svg.parentNode) svg.parentNode.removeChild(svg);
+  }
+  // Dispose old blocks until the deadline. Returns true once all are gone.
+  var disposeUntil = function(deadline) {
+    do {
+      if (!disposer) {
+        var root = roots.pop();
+        if (!root) return true;
+        if (!root.workspace) continue;
+        disposer = Blockly.Xml.createBlockDisposer_(root);
+      }
+      try {
+        if (disposer.step()) disposer = null;
+      } catch (e) {
+        // One block that cannot be disposed must not strand the sprite being
+        // switched to. workspace.clear() gets another go at it.
+        console.warn('Could not dispose a block while clearing.', e);
+        disposer = null;
+      }
+      completed++;
+    } while (performance.now() < deadline);
+    return !disposer && !roots.length;
+  };
   var handle = {cancel: function() {
+    if (cancelled) return;
     cancelled = true;
+    if (!loader) {
+      // Finish the script being disposed and put the untouched ones back, so
+      // nothing is left out of the document. Whatever replaces this load
+      // clears them again; disposing them all here would stall the click
+      // that cancelled it.
+      while (disposer) {
+        try {
+          if (disposer.step()) disposer = null;
+        } catch (e) {
+          console.warn('Could not dispose a block while clearing.', e);
+          disposer = null;
+        }
+      }
+      for (var r = 0; r < roots.length; r++) {
+        var rootSvg = roots[r].workspace && roots[r].getSvgRoot();
+        if (rootSvg && !rootSvg.parentNode) canvas.appendChild(rootSvg);
+      }
+    }
     canvas.style.visibility = visibility;
     if (loader) loader.cancel();
   }};
   workspace.deferredRenderHandle_ = handle;
   var frame = function() {
     if (cancelled) return;
-    var deadline = performance.now() + Blockly.Xml.DEFERRED_RENDER_BUDGET_MS;
-    do {
-      if (!disposer) {
-        var root = roots.pop();
-        if (!root) break;
-        if (!root.workspace) continue;
-        disposer = Blockly.Xml.createBlockDisposer_(root);
+    if (!disposeUntil(performance.now() + Blockly.Xml.DEFERRED_RENDER_BUDGET_MS)) {
+      if (callbacks && callbacks.onProgress) {
+        callbacks.onProgress({phase: 'clearing', completed: completed, total: total});
       }
-      if (disposer.step()) disposer = null;
-      completed++;
-    } while (performance.now() < deadline);
-    if (callbacks && callbacks.onProgress) {
-      callbacks.onProgress({phase: 'clearing', completed: completed, total: total});
-    }
-    if (disposer || roots.length) {
       requestAnimationFrame(frame);
       return;
     }
@@ -674,12 +719,22 @@ Blockly.Xml.clearWorkspaceInFrames_ = function(workspace, load, callbacks) {
     workspace.deferredRenderHandle_ = null;
     Blockly.Events.disable();
     try {
-      workspace.clear();
+      try {
+        workspace.clear();
+      } catch (e) {
+        console.warn('Could not finish clearing the workspace.', e);
+      }
       Blockly.Xml.perfMark_('clear-done');
       Blockly.Xml.perfMeasure_('clear', 'switch-start', 'clear-done');
       canvas.style.visibility = visibility;
       loader = load();
+    } catch (e) {
+      console.warn('Could not load the workspace.', e);
+      if (callbacks && callbacks.onProgress) {
+        callbacks.onProgress({phase: 'error', completed: 0, total: 0, failures: 1});
+      }
     } finally {
+      canvas.style.visibility = visibility;
       Blockly.Events.enable();
     }
   };
@@ -956,17 +1011,22 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
   var pendingReveal = [];
   var pendingRevealBlocks = 0;
   var lastReveal = -Infinity;
-  var revealScript = function(script) {
-    removePlaceholder(script);
-    var topBlock = script.topBlock;
-    if (!topBlock || !topBlock.workspace) return;
-    var svgRoot = topBlock.getSvgRoot();
+  var revealRoot = function(block) {
+    if (!block || !block.workspace) return;
+    var svgRoot = block.getSvgRoot();
     if (!svgRoot) return;
     if (staging && svgRoot.parentNode === staging) {
       canvas.appendChild(svgRoot);
     }
     svgRoot.style.visibility = '';
-    Blockly.Xml.restoreFrameVisibility_(workspace, topBlock);
+    Blockly.Xml.restoreFrameVisibility_(workspace, block);
+  };
+  var revealScript = function(script) {
+    removePlaceholder(script);
+    revealRoot(script.topBlock);
+    for (var i = 0; script.loose && i < script.loose.length; i++) {
+      if (!script.loose[i].getParent()) revealRoot(script.loose[i]);
+    }
   };
   var revealedBlocks = function() {
     var count = 0;
@@ -1001,27 +1061,38 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     Blockly.Events.disable();
     try {
       var topBlock;
+      script.loose = null;
       if (script.desc) {
         if (!script.builder) {
           script.builder = Blockly.Xml.createDescBlockBuilder_(script.desc, script.ctx, workspace, true);
         }
         if (!script.builder.step()) return false;
-        topBlock = script.builder.root;
-        // Mutations may also create default argument shadows. Include them in
-        // the parent-first positioning pass.
-        script.blocks = topBlock.getDescendants(false);
+        var builder = script.builder;
+        topBlock = builder.root;
+        if (!topBlock) {
+          throw builder.error || Error('Script has no blocks: ' + script.desc.id);
+        }
+        // Blocks that failed or were left loose still count as not loaded, so
+        // the editor says so, but the rest of the script shows.
+        failures += builder.failures + builder.loose.length;
+        script.loose = builder.loose.length ? builder.loose : null;
         script.builder = null;
       } else {
         topBlock = Blockly.Xml.domToBlockHeadless_(script.xmlNode, workspace);
-        script.blocks = topBlock.getDescendants(false);
       }
+      // Mutations may also create default argument shadows. Include them in
+      // the parent-first positioning pass.
+      script.blocks = Blockly.Xml.scriptBlocks_(topBlock, script.loose);
       script.topBlock = topBlock;
-      topBlock.setConnectionsHidden(true);
-      var svgRoot = topBlock.getSvgRoot();
-      if (svgRoot) {
-        svgRoot.style.visibility = 'hidden';
-        if (staging && svgRoot.parentNode !== canvas) {
-          staging.appendChild(svgRoot);
+      var roots = [topBlock].concat(script.loose || []);
+      for (var r = 0; r < roots.length; r++) {
+        roots[r].setConnectionsHidden(true);
+        var svgRoot = roots[r].getSvgRoot();
+        if (svgRoot) {
+          svgRoot.style.visibility = 'hidden';
+          if (staging && svgRoot.parentNode !== canvas) {
+            staging.appendChild(svgRoot);
+          }
         }
       }
       if (script.hasPosition) {
@@ -1076,6 +1147,11 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
       return false;
     }
     if (!script.topBlock.workspace || script.topBlock.getParent()) {
+      return false;
+    }
+    if (script.loose) {
+      // Loose blocks are not part of the script's tree, and the user may have
+      // moved them into it or elsewhere since. Keep such scripts loaded.
       return false;
     }
     if (workspace.currentGesture_) {
@@ -1258,6 +1334,14 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
         script.phase = -1;
         script.topBlock = null;
         script.blocks = null;
+        for (var l = 0; script.loose && l < script.loose.length; l++) {
+          var loose = script.loose[l];
+          if (loose.workspace && !loose.getParent()) {
+            var looseDisposer = Blockly.Xml.createBlockDisposer_(loose);
+            while (!looseDisposer.step()) { /* Dispose it all now. */ }
+          }
+        }
+        script.loose = null;
       }
       if (!viewport || !script.hasPosition) {
         return {script: script, dist: 0};
@@ -1292,10 +1376,17 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
       } catch (e) {
         console.warn('Deferred block materialization failed.', e);
         failures++;
-        if (script.builder && script.builder.root) {
-          var disposer = Blockly.Xml.createBlockDisposer_(script.builder.root);
-          while (!disposer.step()) {}
+        var built = script.builder ? [script.builder.root].concat(script.builder.loose) :
+            [script.topBlock].concat(script.loose || []);
+        for (var b = 0; b < built.length; b++) {
+          if (built[b] && built[b].workspace && !built[b].getParent()) {
+            var disposer = Blockly.Xml.createBlockDisposer_(built[b]);
+            while (!disposer.step()) { /* Dispose it all now. */ }
+          }
         }
+        script.builder = null;
+        script.topBlock = null;
+        script.loose = null;
         dropScript(script);
         return;
       }
@@ -1306,11 +1397,18 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     var topBlock = script.topBlock;
     try {
       if (script.phase === finalPhase) {
-        topBlock.setConnectionsHidden(false);
-        topBlock.updateDisabled();
-        if (workspace.restoreGlows) {
-          // It may have been running the whole time it was unloaded.
-          workspace.restoreGlows(topBlock);
+        var roots = [topBlock].concat(script.loose || []);
+        for (var r = 0; r < roots.length; r++) {
+          if (!roots[r].workspace || (r && roots[r].getParent())) continue;
+          roots[r].setConnectionsHidden(false);
+          roots[r].updateDisabled();
+          if (workspace.restoreGlows) {
+            // It may have been running the whole time it was unloaded.
+            workspace.restoreGlows(roots[r]);
+          }
+        }
+        if (script.loose) {
+          Blockly.Xml.placeLooseBlocks_(topBlock, script.loose);
         }
       } else {
         var block = script.blocks[script.blockIndex];
@@ -1321,8 +1419,11 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
             block.renderDeferredConnections_(block.deferredRenderXY_ || block.getRelativeToSurfaceXY());
             delete block.deferredRenderXY_;
           } else {
+            // Top level blocks stay hidden until their script is revealed.
+            // Show the rest first: a block that fails to draw must not hide
+            // the blocks nested in it and after it, which sit in its group.
+            if (block.getParent() && block.getSvgRoot()) block.getSvgRoot().style.visibility = '';
             block.render(false, deferredConnections);
-            if (block !== topBlock && block.getSvgRoot()) block.getSvgRoot().style.visibility = '';
           }
         }
       }
@@ -1337,6 +1438,9 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
         script.height = measured.height;
         if (workspace.intersectionObserver) {
           workspace.intersectionObserver.markDirty(topBlock);
+          for (var l = 0; script.loose && l < script.loose.length; l++) {
+            workspace.intersectionObserver.markDirty(script.loose[l]);
+          }
           workspace.queueIntersectionCheck();
         }
       }
@@ -1353,7 +1457,7 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
         script.phase++;
         if (deferredConnections && script.phase === 2) {
           // Drawing can add boolean toggle shadows or remove obsolete ones.
-          script.blocks = topBlock.getDescendants(false);
+          script.blocks = Blockly.Xml.scriptBlocks_(topBlock, script.loose);
         }
         script.blockIndex = deferredConnections && script.phase === 2 ? 0 : script.blocks.length - 1;
       }
@@ -1730,6 +1834,23 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     materializeScripts(ids);
   };
   workspace.wakeVirtualScripts_ = wake;
+  /**
+   * Whether a block ID belongs to a script the VM has but the workspace has
+   * not loaded. Blocks created with such an ID would take over the VM's block.
+   * @param {string} id Block ID.
+   * @return {boolean} True if the ID is taken by an unloaded block.
+   */
+  workspace.isUnloadedBlockId = function(id) {
+    if (!id || workspace.blockDB_[id]) {
+      return false;
+    }
+    for (var i = 0; i < scripts.length; i++) {
+      if (scripts[i].ctx) {
+        return !!scripts[i].ctx.blocks[id];
+      }
+    }
+    return false;
+  };
 
   // Far-off scripts only need bounds, not thousands of invisible SVG nodes.
   var initialViewport = getViewport();
@@ -1760,6 +1881,7 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     workspace.materializeAllScripts = null;
     workspace.materializeScriptsForBlockIds = null;
     workspace.wakeVirtualScripts_ = null;
+    workspace.isUnloadedBlockId = null;
     for (var i = 0; i < scripts.length; i++) {
       removePlaceholder(scripts[i]);
     }
@@ -2139,14 +2261,16 @@ Blockly.Xml.domToBlockHeadless_ = function(xmlBlock, workspace) {
         if (childBlockElement) {
           blockChild = Blockly.Xml.domToBlockHeadless_(childBlockElement,
               workspace);
-          if (blockChild.outputConnection) {
-            input.connection.connect(blockChild.outputConnection);
-          } else if (blockChild.previousConnection) {
-            input.connection.connect(blockChild.previousConnection);
-          } else {
+          var childConnection = blockChild.outputConnection ||
+              blockChild.previousConnection;
+          if (!childConnection) {
             // Keep malformed or changed extension blocks as top-level blocks so
             // one incompatible input does not prevent the workspace from loading.
             console.warn('Child block does not have output or previous statement.');
+          } else if (!Blockly.Xml.connectLoadedBlock_(input.connection,
+              childConnection)) {
+            // Throws with the reason they cannot connect.
+            input.connection.connect(childConnection);
           }
         }
         break;
@@ -2270,6 +2394,9 @@ Blockly.Xml.blockDescToDom = function(desc, ctx) {
   if (desc.collapsed) {
     element.setAttribute('collapsed', 'true');
   }
+  if (desc.booleanToggle) {
+    element.setAttribute('boolean-toggle', 'true');
+  }
   if (desc.mutation) {
     element.appendChild(Blockly.Xml.mutationDescToDom_(desc.mutation));
   }
@@ -2347,30 +2474,111 @@ Blockly.Xml.descToField_ = function(block, fieldDesc) {
 };
 
 /**
- * Create a block and its children from a block description.
+ * Connect a block that is being loaded to the connection the VM has it on.
+ * Loading reproduces what the project already holds, so a block the editor
+ * would not let you drop into this slot (a round reporter in a Boolean slot,
+ * say) still goes into it: the VM runs it from there. A block that cannot
+ * connect at all, such as a stack block in a reporter slot or a block whose
+ * extension changed shape or did not load, is left beside the script.
+ * @param {Blockly.Connection} parentConnection Connection on the parent.
+ * @param {Blockly.Connection} childConnection Connection on the child.
+ * @return {boolean} Whether the blocks were connected.
+ * @private
+ */
+Blockly.Xml.connectLoadedBlock_ = function(parentConnection, childConnection) {
+  if (!parentConnection || !childConnection) {
+    return false;
+  }
+  var reason = parentConnection.canConnectWithReason_(childConnection);
+  if (reason == Blockly.Connection.CAN_CONNECT) {
+    parentConnection.connect(childConnection);
+    return true;
+  }
+  if (reason == Blockly.Connection.REASON_CHECKS_FAILED &&
+      parentConnection.isSuperior()) {
+    // Only the type check may be skipped. Check the rules after it the same
+    // way canConnectWithReason_ would have.
+    var parentBlock = parentConnection.getSourceBlock();
+    var childBlock = childConnection.getSourceBlock();
+    var procedure = parentBlock.type == Blockly.PROCEDURES_DEFINITION_BLOCK_TYPE ||
+        parentBlock.type == Blockly.PROCEDURES_PROTOTYPE_BLOCK_TYPE ||
+        childBlock.type == Blockly.PROCEDURES_PROTOTYPE_BLOCK_TYPE;
+    if (!procedure && !(parentBlock.isShadow() && !childBlock.isShadow())) {
+      parentConnection.connect_(childConnection);
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * Create a block and its children from a block description, a step at a time.
+ * A block that fails to load is skipped, and a block that cannot connect to its
+ * parent is left loose (see connectLoadedBlock_), so one bad block never costs
+ * the rest of its script. The result lists those loose blocks in `loose` and
+ * counts what failed in `failures`.
  * @param {!Object} desc Block description.
  * @param {!Object} ctx Load context: {blocks, comments}.
  * @param {!Blockly.Workspace} workspace The workspace.
- * @return {!Blockly.Block} The root block created.
+ * @param {boolean} hide Build hidden blocks for the deferred renderer.
+ * @return {!Object} Builder with step(), root, blocks, loose and failures.
  * @private
  */
 Blockly.Xml.createDescBlockBuilder_ = function(desc, ctx, workspace, hide) {
   var tasks = [];
   var seen = Object.create(null);
-  var result = {root: null, blocks: []};
-  var create = function(d, connect) {
+  var result = {root: null, blocks: [], loose: [], failures: 0, error: null};
+  var strays = [];
+  var fail = function(e) {
+    result.failures++;
+    if (!result.error) result.error = e;
+    console.warn('Could not load a block.', e);
+  };
+  var attach = function(block, connect, parent, shadow) {
+    var connected = false;
+    try {
+      connected = connect(block);
+    } catch (e) {
+      fail(e);
+    }
+    if (connected || !block.workspace || block.getParent()) {
+      return;
+    }
+    if (shadow) {
+      // A shadow on its own is nothing to show or edit. Its own tasks are
+      // still queued, so dispose of it once the script is built.
+      strays.push(block);
+      fail(Error('Shadow block does not fit its input: ' + block.type));
+      return;
+    }
+    // The VM still has the block on its parent. Moving or deleting it must
+    // tell the VM it left there (see Blockly.Events.Move).
+    block.loadedParent_ = parent;
+    workspace.hasLooseBlocks_ = true;
+    result.loose.push(block);
+  };
+  var create = function(d, connect, parent) {
     return function() {
-      goog.asserts.assert(d.opcode, 'Block type unspecified: %s', d.id);
-      if (seen[d.id]) throw Error('Repeated block in script: ' + d.id);
+      if (!d.opcode) throw Error('Block type unspecified: ' + d.id);
+      if (seen[d.id]) {
+        // A corrupt project can list a block in two places. Show it once.
+        console.warn('Repeated block in script: ' + d.id);
+        return;
+      }
       seen[d.id] = true;
       var block = workspace.newBlock(d.opcode, d.id);
       result.blocks.push(block);
       if (!result.root) result.root = block;
+      block.booleanToggle_ = !!d.booleanToggle;
       if (d.mutation && block.domToMutation) {
-        block.domToMutation(Blockly.Xml.mutationDescToDom_(d.mutation));
-        // The deferred SVG pass initializes the final inputs once. Doing it
-        // here too lays out partially constructed scripts between frames.
-        if (!hide && block.initSvg) block.initSvg();
+        try {
+          block.domToMutation(Blockly.Xml.mutationDescToDom_(d.mutation));
+          // The deferred SVG pass initializes the final inputs once. Doing it
+          // here too lays out partially constructed scripts between frames.
+          if (!hide && block.initSvg) block.initSvg();
+        } catch (e) {
+          fail(e);
+        }
       }
       if (hide && block.setConnectionsHidden) {
         block.setConnectionsHidden(true);
@@ -2379,29 +2587,38 @@ Blockly.Xml.createDescBlockBuilder_ = function(desc, ctx, workspace, hide) {
       }
       if (d.comment && ctx.comments && ctx.comments[d.comment]) {
         var comment = ctx.comments[d.comment];
-        Blockly.Xml.applyBlockComment_(block, {
-          id: comment.id, x: comment.x, y: comment.y,
-          w: comment.width, h: comment.height,
-          minimized: !!comment.minimized, pinned: true, text: comment.text
-        });
+        try {
+          Blockly.Xml.applyBlockComment_(block, {
+            id: comment.id, x: comment.x, y: comment.y,
+            w: comment.width, h: comment.height,
+            minimized: !!comment.minimized, pinned: true, text: comment.text
+          });
+        } catch (e) {
+          fail(e);
+        }
       }
       // During deferred rendering attach each new node while it is small.
       // Reattaching a completed nested SVG subtree repeatedly is quadratic.
-      if (hide && connect) connect(block);
+      if (hide && connect) attach(block, connect, parent, d.shadow);
       tasks.push(function() {
         if (d.shadow) block.setShadow(true);
         if (d.collapsed) block.setCollapsed(true);
-        if (!hide && connect) connect(block);
+        if (!hide && connect) attach(block, connect, parent, d.shadow);
       });
       if (d.next && ctx.blocks[d.next]) {
         tasks.push(create(ctx.blocks[d.next], function(next) {
-          goog.asserts.assert(block.nextConnection, 'Next statement does not exist.');
-          goog.asserts.assert(next.previousConnection, 'Next block has no previous statement.');
-          block.nextConnection.connect(next.previousConnection);
-        }));
+          return Blockly.Xml.connectLoadedBlock_(block.nextConnection,
+              next.previousConnection);
+        }, {parentId: block.id, inputName: null}));
       }
       tasks.push(function() {
-        for (var name in d.fields) Blockly.Xml.descToField_(block, d.fields[name]);
+        for (var name in d.fields) {
+          try {
+            Blockly.Xml.descToField_(block, d.fields[name]);
+          } catch (e) {
+            fail(e);
+          }
+        }
       });
       Object.keys(d.inputs || {}).reverse().forEach(function(name) {
         var inputDesc = d.inputs[name];
@@ -2413,26 +2630,116 @@ Blockly.Xml.createDescBlockBuilder_ = function(desc, ctx, workspace, hide) {
         if (inputDesc.shadow && ctx.blocks[inputDesc.shadow]) {
           input.connection.setShadowDesc(ctx.blocks[inputDesc.shadow], ctx);
         }
+        var inputParent = {parentId: block.id, inputName: input.name};
+        var connectToInput = function(child) {
+          return Blockly.Xml.connectLoadedBlock_(input.connection,
+              child.outputConnection || child.previousConnection);
+        };
         tasks.push(create(childDesc, function(child) {
-          var connection = child.outputConnection || child.previousConnection;
-          goog.asserts.assert(connection, 'Child block has no output or previous statement.');
-          input.connection.connect(connection);
-        }));
+          if (connectToInput(child)) return true;
+          // The slot shows its shadow, as it would if the block were dragged out.
+          var shadowDesc = inputDesc.shadow && inputDesc.shadow !== childId &&
+              ctx.blocks[inputDesc.shadow];
+          if (shadowDesc) tasks.push(create(shadowDesc, connectToInput, inputParent));
+          return false;
+        }, inputParent));
       });
     };
   };
   tasks.push(create(desc));
   result.step = function() {
-    if (tasks.length) tasks.pop()();
-    return tasks.length === 0;
+    if (tasks.length) {
+      var task = tasks.pop();
+      try {
+        task();
+      } catch (e) {
+        fail(e);
+      }
+    }
+    if (tasks.length) {
+      return false;
+    }
+    while (strays.length) {
+      var stray = strays.pop();
+      result.blocks.splice(result.blocks.indexOf(stray), 1);
+      if (stray.workspace && !stray.getParent()) stray.dispose(false);
+    }
+    return true;
   };
   return result;
 };
 
-Blockly.Xml.descToBlockHeadless_ = function(desc, ctx, workspace) {
+/**
+ * Build a script from its description in one go.
+ * @param {!Object} desc Block description.
+ * @param {!Object} ctx Load context.
+ * @param {!Blockly.Workspace} workspace The workspace.
+ * @return {!Object} The finished builder (see createDescBlockBuilder_).
+ * @private
+ */
+Blockly.Xml.descToBlocksHeadless_ = function(desc, ctx, workspace) {
   var builder = Blockly.Xml.createDescBlockBuilder_(desc, ctx, workspace, false);
   while (!builder.step()) { /* Synchronous callers share the same importer. */ }
-  return builder.root;
+  return builder;
+};
+
+Blockly.Xml.descToBlockHeadless_ = function(desc, ctx, workspace) {
+  return Blockly.Xml.descToBlocksHeadless_(desc, ctx, workspace).root;
+};
+
+/**
+ * Put blocks that could not connect to their parent beside the script they
+ * came from, one under another, so they can be seen and fixed.
+ * @param {!Blockly.BlockSvg} topBlock The script's top block, rendered.
+ * @param {!Array.<!Blockly.BlockSvg>} loose Loose blocks, rendered.
+ * @private
+ */
+Blockly.Xml.placeLooseBlocks_ = function(topBlock, loose) {
+  if (!loose.length) return;
+  // Placing them is not an edit. A move event here would detach them in the
+  // VM, changing the project just by looking at it.
+  Blockly.Events.disable();
+  try {
+    Blockly.Xml.placeLooseBlocksNow_(topBlock, loose);
+  } finally {
+    Blockly.Events.enable();
+  }
+};
+
+/**
+ * @param {!Blockly.BlockSvg} topBlock The script's top block, rendered.
+ * @param {!Array.<!Blockly.BlockSvg>} loose Loose blocks, rendered.
+ * @private
+ */
+Blockly.Xml.placeLooseBlocksNow_ = function(topBlock, loose) {
+  var xy = topBlock.getRelativeToSurfaceXY();
+  var gap = Blockly.SNAP_RADIUS;
+  var x = xy.x + (topBlock.RTL ? -1 : 1) * (topBlock.getHeightWidth().width + gap);
+  var y = xy.y;
+  for (var i = 0; i < loose.length; i++) {
+    var block = loose[i];
+    if (!block.workspace || block.getParent()) continue;
+    var at = block.getRelativeToSurfaceXY();
+    block.moveBy(x - at.x, y - at.y);
+    y += block.getHeightWidth().height + gap;
+  }
+};
+
+/**
+ * The blocks of a script, plus those of any blocks left loose beside it.
+ * @param {!Blockly.Block} topBlock The script's top block.
+ * @param {Array.<!Blockly.Block>} loose Loose blocks, or null.
+ * @return {!Array.<!Blockly.Block>} Parents before children.
+ * @private
+ */
+Blockly.Xml.scriptBlocks_ = function(topBlock, loose) {
+  var blocks = topBlock.getDescendants(false);
+  for (var i = 0; loose && i < loose.length; i++) {
+    if (loose[i].workspace && !loose[i].getParent()) {
+      blocks = blocks.concat(loose[i].getDescendants(false));
+    }
+  }
+  return blocks;
 };
 
 /**
@@ -2478,11 +2785,19 @@ Blockly.Xml.measureDesc_ = function(desc, ctx) {
  * is the usual path; this is for workspaces small enough not to need it.
  * @param {!Object} descs {blocks, scripts, comments}.
  * @param {!Blockly.Workspace} workspace The workspace.
+ * @return {!Object} {failures, error}: how many blocks could not be loaded
+ *     where the VM has them, and the first error.
  * @private
  */
 Blockly.Xml.descsToWorkspace_ = function(descs, workspace) {
   var ctx = {blocks: descs.blocks, comments: descs.comments};
   var width = workspace.RTL ? workspace.getWidth() : 0;
+  var failures = 0;
+  var firstError = null;
+  var noteFailure = function(e) {
+    failures++;
+    if (!firstError) firstError = e;
+  };
   Blockly.Events.disable();
   try {
     for (var i = 0; i < descs.scripts.length; i++) {
@@ -2490,34 +2805,61 @@ Blockly.Xml.descsToWorkspace_ = function(descs, workspace) {
       if (!desc) {
         continue;
       }
-      var topBlock = Blockly.Xml.descToBlockHeadless_(desc, ctx, workspace);
-      var blocks = topBlock.getDescendants(false);
-      if (workspace.rendered) {
-        topBlock.setConnectionsHidden(true);
-        for (var j = blocks.length - 1; j >= 0; j--) {
-          blocks[j].initSvg();
+      // One script that cannot load must not stop the rest from loading.
+      try {
+        var builder = Blockly.Xml.descToBlocksHeadless_(desc, ctx, workspace);
+        failures += builder.failures + builder.loose.length;
+        if (builder.error && !firstError) firstError = builder.error;
+        var topBlock = builder.root;
+        if (!topBlock) {
+          continue;
         }
-        for (var k = blocks.length - 1; k >= 0; k--) {
-          blocks[k].render(false);
+        var loose = builder.loose;
+        var roots = [topBlock].concat(loose);
+        var blocks = Blockly.Xml.scriptBlocks_(topBlock, loose);
+        if (workspace.rendered) {
+          for (var r = 0; r < roots.length; r++) roots[r].setConnectionsHidden(true);
+          for (var j = blocks.length - 1; j >= 0; j--) {
+            try {
+              blocks[j].initSvg();
+            } catch (e) {
+              noteFailure(e);
+            }
+          }
+          for (var k = blocks.length - 1; k >= 0; k--) {
+            try {
+              blocks[k].render(false);
+            } catch (e) {
+              noteFailure(e);
+            }
+          }
+          for (var r2 = 0; r2 < roots.length; r2++) {
+            roots[r2].setConnectionsHidden(false);
+            roots[r2].updateDisabled();
+          }
+        } else {
+          for (var m = blocks.length - 1; m >= 0; m--) {
+            blocks[m].initModel();
+          }
         }
-        topBlock.setConnectionsHidden(false);
-        topBlock.updateDisabled();
-      } else {
-        for (var m = blocks.length - 1; m >= 0; m--) {
-          blocks[m].initModel();
+        if (typeof desc.x === 'number' && typeof desc.y === 'number') {
+          topBlock.moveBy(workspace.RTL ? width - desc.x : desc.x, desc.y);
+          if (topBlock.comment && typeof topBlock.comment === 'object') {
+            var commentXY = topBlock.comment.getXY();
+            var commentWidth = topBlock.comment.getBubbleSize().width;
+            topBlock.comment.moveTo(workspace.RTL ?
+                width - commentXY.x - commentWidth : commentXY.x, commentXY.y);
+          }
         }
-      }
-      if (typeof desc.x === 'number' && typeof desc.y === 'number') {
-        topBlock.moveBy(workspace.RTL ? width - desc.x : desc.x, desc.y);
-        if (topBlock.comment && typeof topBlock.comment === 'object') {
-          var commentXY = topBlock.comment.getXY();
-          var commentWidth = topBlock.comment.getBubbleSize().width;
-          topBlock.comment.moveTo(workspace.RTL ?
-              width - commentXY.x - commentWidth : commentXY.x, commentXY.y);
+        if (workspace.rendered) {
+          Blockly.Xml.placeLooseBlocks_(topBlock, loose);
+          for (var r3 = 0; r3 < roots.length; r3++) {
+            Blockly.Xml.restoreFrameVisibility_(workspace, roots[r3]);
+          }
         }
-      }
-      if (workspace.rendered) {
-        Blockly.Xml.restoreFrameVisibility_(workspace, topBlock);
+      } catch (e) {
+        console.warn('Could not load a script.', e);
+        noteFailure(e);
       }
     }
   } finally {
@@ -2526,6 +2868,7 @@ Blockly.Xml.descsToWorkspace_ = function(descs, workspace) {
   if (workspace.rendered) {
     workspace.resizeContents();
   }
+  return {failures: failures, error: firstError};
 };
 
 /**
@@ -2562,7 +2905,14 @@ Blockly.Xml.clearWorkspaceAndLoadFromDescs = function(xml, descs, workspace) {
   try {
     workspace.clear();
     Blockly.Xml.domToWorkspace(xml, workspace);
-    Blockly.Xml.descsToWorkspace_(descs, workspace);
+    var result = Blockly.Xml.descsToWorkspace_(descs, workspace);
+    if (result.failures) {
+      // Everything that could load has loaded. Report the rest so the editor
+      // can say part of the sprite could not be shown.
+      var reason = result.error ? ': ' + (result.error.message || result.error) : '';
+      throw Error(result.failures + ' blocks could not be loaded where the project has them' +
+          reason);
+    }
   } finally {
     Blockly.Events.enable();
     workspace.setResizesEnabled(true);
