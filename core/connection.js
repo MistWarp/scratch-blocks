@@ -163,7 +163,7 @@ Blockly.Connection.prototype.connect_ = function(childConnection) {
       return block !== childBlock &&
           block.loadedParent_.parentId == parentBlock.id &&
           (block.loadedParent_.inputName || null) == inputName;
-    });
+    }, true);
   }
   var isSurroundingC = false;
   if (parentConnection == parentBlock.getFirstStatementConnection()) {

@@ -2554,6 +2554,7 @@ Blockly.Xml.createDescBlockBuilder_ = function(desc, ctx, workspace, hide) {
     // The VM still has the block on its parent. Moving or deleting it must
     // tell the VM it left there (see Blockly.Events.Move).
     block.loadedParent_ = parent;
+    workspace.hasLooseBlocks_ = true;
     result.loose.push(block);
   };
   var create = function(d, connect, parent) {

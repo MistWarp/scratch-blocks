@@ -982,8 +982,11 @@ function test_fillingTheSlotDetachesTheBlockLeftOutOfIt() {
     var moved = events.filter(function(event) { return event.type == Blockly.Events.MOVE; })
         .map(function(event) { return event.blockId; });
     assertEquals('The loose block leaves the slot first', 'stack', moved[0]);
-    assertEquals('then the shadow is put back', 'slot', moved[1]);
-    assertTrue('before the new block goes in', moved.indexOf('number') > 1);
+    assertEquals('The shadow is not put back into a slot being filled', -1,
+        events.indexOf(events.filter(function(event) {
+          return event.blockId == 'slot' && event.newParentId == 'near';
+        })[0]));
+    assertTrue('then the new block goes in', moved.indexOf('number') > 0);
   });
 }
 
@@ -1016,8 +1019,16 @@ function test_clearFinishesWhenABlockCannotBeDisposed() {
   deferredXmlTest(function(ws, ctx, view, flush) {
     for (var i = 0; i < 5; i++) ws.newBlock('deferred_test', 'old' + i);
     ws.getBlockById('old2').dispose = function() { throw Error('broken dispose'); };
+    // A failure inside a script, after its top block left the top block list.
+    var parent = ws.newBlock('deferred_test', 'parent');
+    var child = ws.newBlock('deferred_test', 'child');
+    parent.nextConnection.connect(child.previousConnection);
+    var grandchild = ws.newBlock('deferred_test', 'grandchild');
+    child.nextConnection.connect(grandchild.previousConnection);
+    child.dispose = function() { throw Error('broken dispose'); };
     ws.clear();
     assertEquals(0, ws.getTopBlocks().length);
+    assertEquals('No IDs are left behind', 0, Object.keys(ws.blockDB_).length);
     assertFalse(ws.isClearing);
     assertEquals('', Blockly.Events.getGroup());
     ws.connectionDBList.forEach(function(db) {

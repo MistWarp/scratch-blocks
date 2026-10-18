@@ -266,10 +266,12 @@ Blockly.Block.prototype.loadedParent_ = null;
  * where they really are now. See loadedParent_.
  * @param {!Blockly.Workspace} workspace The workspace.
  * @param {function(!Blockly.Block):boolean} test Which loose blocks to detach.
+ * @param {boolean=} opt_slotFilled The slot they leave is being filled, so its
+ *     shadow is not put back.
  * @package
  */
-Blockly.Block.detachLooseBlocks_ = function(workspace, test) {
-  if (!Blockly.Events.isEnabled()) {
+Blockly.Block.detachLooseBlocks_ = function(workspace, test, opt_slotFilled) {
+  if (!workspace.hasLooseBlocks_ || !Blockly.Events.isEnabled()) {
     return;
   }
   var blocks = workspace.getTopBlocks(false);
@@ -277,6 +279,11 @@ Blockly.Block.detachLooseBlocks_ = function(workspace, test) {
     var block = blocks[i];
     if (block.loadedParent_ && test(block)) {
       var move = new Blockly.Events.BlockMove(block);
+      if (opt_slotFilled) {
+        // The shadow is about to be replaced; refilling it here would merge
+        // with its own move out and keep that move off the undo stack.
+        move.refillShadow_ = null;
+      }
       move.recordNew();
       Blockly.Events.fire(move);
     }
