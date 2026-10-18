@@ -584,3 +584,218 @@ function test_deferredNestedLayoutMatchesSynchronousLayout() {
     assertEquals('Finished script is visible', '', ws.getBlockById('repeat0').getSvgRoot().style.display);
   });
 }
+
+// Blocks that the VM holds in a slot the editor would not let you drop them in.
+function defineMismatchBlocks() {
+  Blockly.Blocks.deferred_bool_slot = {
+    init: function() {
+      this.appendValueInput('COND').setCheck('Boolean');
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour('#123456');
+    }
+  };
+  Blockly.Blocks.deferred_round = {
+    init: function() {
+      this.setOutput(true, 'Number');
+      this.setColour('#123456');
+    }
+  };
+}
+
+function deleteMismatchBlocks() {
+  delete Blockly.Blocks.deferred_bool_slot;
+  delete Blockly.Blocks.deferred_round;
+}
+
+function mismatchCtx() {
+  return {
+    blocks: {
+      top: {id: 'top', opcode: 'deferred_bool_slot', topLevel: true, x: 10, y: 10,
+        inputs: {COND: {name: 'COND', block: 'round', shadow: null}}, fields: {}, next: 'after'},
+      round: {id: 'round', opcode: 'deferred_round', topLevel: false, inputs: {}, fields: {}},
+      after: {id: 'after', opcode: 'deferred_test', topLevel: false, inputs: {},
+        fields: {TEXT: {name: 'TEXT', value: 'after'}}},
+      other: {id: 'other', opcode: 'deferred_test', topLevel: true, x: 10, y: 300,
+        inputs: {}, fields: {}}
+    },
+    scripts: ['top', 'other'],
+    comments: {}
+  };
+}
+
+function test_deferredTypeMismatchStaysInItsSlot() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    defineMismatchBlocks();
+    try {
+      var status = null;
+      Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {
+        onProgress: function(value) { status = value; }
+      }, mismatchCtx());
+      flush();
+      var top = ws.getBlockById('top');
+      assertNotNull('The script loads', top);
+      assertEquals('The reporter stays where the VM has it', top,
+          ws.getBlockById('round').getParent());
+      assertEquals(top, ws.getBlockById('after').getParent());
+      assertNotEquals('hidden', top.getSvgRoot().style.visibility);
+      assertEquals('idle', status.phase);
+    } finally {
+      deleteMismatchBlocks();
+    }
+  });
+}
+
+function test_deferredBlockThatCannotConnectIsLeftBesideItsScript() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    // A stack block in a reporter slot cannot connect at all.
+    ctx.blocks.near.inputs = {VALUE: {name: 'VALUE', block: 'stack', shadow: null}};
+    ctx.blocks.near.next = 'tail';
+    ctx.blocks.stack = {id: 'stack', opcode: 'deferred_test', topLevel: false,
+      inputs: {VALUE: {name: 'VALUE', block: 'num', shadow: null}}, fields: {}};
+    ctx.blocks.num = {id: 'num', opcode: 'deferred_number', topLevel: false, inputs: {}, fields: {}};
+    ctx.blocks.tail = {id: 'tail', opcode: 'deferred_test', topLevel: false, inputs: {}, fields: {}};
+    var status = null;
+    Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {
+      onProgress: function(value) { status = value; }
+    }, ctx);
+    flush();
+    var near = ws.getBlockById('near');
+    assertNotNull('The rest of the script loads', near);
+    assertEquals(near, ws.getBlockById('tail').getParent());
+    var stack = ws.getBlockById('stack');
+    assertNotNull('The block that does not fit is kept', stack);
+    assertNull(stack.getParent());
+    assertEquals('with its own children', stack, ws.getBlockById('num').getParent());
+    assertEquals('shown', ws.getCanvas(), stack.getSvgRoot().parentNode);
+    assertNotEquals('hidden', stack.getSvgRoot().style.visibility);
+    assertTrue('beside the script, not on top of it',
+        stack.getRelativeToSurfaceXY().x > near.getRelativeToSurfaceXY().x);
+    assertEquals('error', status.phase);
+    assertEquals(1, status.failures);
+  });
+}
+
+function test_deferredUnknownBlockKeepsTheRestOfItsScript() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    // Blocks from an extension that did not load.
+    ctx.blocks.near.next = 'gone';
+    ctx.blocks.gone = {id: 'gone', opcode: 'unknown_test_block', topLevel: false,
+      inputs: {}, fields: {}, next: 'tail'};
+    ctx.blocks.tail = {id: 'tail', opcode: 'deferred_test', topLevel: false, inputs: {}, fields: {}};
+    var status = null;
+    Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {
+      onProgress: function(value) { status = value; }
+    }, ctx);
+    flush();
+    assertNotNull(ws.getBlockById('near'));
+    assertNotEquals('hidden', ws.getBlockById('near').getSvgRoot().style.visibility);
+    assertEquals('error', status.phase);
+    assertTrue(status.failures >= 1);
+  });
+}
+
+function test_deferredRepeatedBlockLoadsOnce() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    ctx.blocks.near.inputs = {VALUE: {name: 'VALUE', block: 'num', shadow: null}};
+    ctx.blocks.near.next = 'tail';
+    ctx.blocks.tail = {id: 'tail', opcode: 'deferred_test', topLevel: false,
+      inputs: {VALUE: {name: 'VALUE', block: 'num', shadow: null}}, fields: {}};
+    ctx.blocks.num = {id: 'num', opcode: 'deferred_number', topLevel: false, inputs: {}, fields: {}};
+    Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {}, ctx);
+    flush();
+    assertNotNull(ws.getBlockById('near'));
+    assertEquals(ws.getBlockById('tail'), ws.getBlockById('near').getNextBlock());
+    assertNotNull(ws.getBlockById('num'));
+  });
+}
+
+function test_descriptionsKeepBooleanToggles() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    ctx.blocks.near.booleanToggle = true;
+    ctx.blocks.far.x = 50;
+    Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {}, ctx);
+    flush();
+    assertTrue(ws.getBlockById('near').booleanToggle_);
+    assertFalse(!!ws.getBlockById('far').booleanToggle_);
+    assertEquals('true', Blockly.Xml.blockDescToDom(ctx.blocks.near, ctx)
+        .getAttribute('boolean-toggle'));
+  });
+}
+
+function test_synchronousDescriptionLoadKeepsGoingPastABadScript() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    defineMismatchBlocks();
+    try {
+      var descs = mismatchCtx();
+      descs.blocks.top.inputs.COND.block = 'stack';
+      descs.blocks.stack = {id: 'stack', opcode: 'deferred_test', topLevel: false, inputs: {}, fields: {}};
+      var error = null;
+      try {
+        Blockly.Xml.clearWorkspaceAndLoadFromDescs(Blockly.Xml.textToDom('<xml/>'), descs, ws);
+      } catch (e) {
+        error = e;
+      }
+      assertNotNull('The editor hears that something did not load', error);
+      assertNotNull(ws.getBlockById('top'));
+      assertNotNull(ws.getBlockById('after'));
+      assertNotNull('Later scripts still load', ws.getBlockById('other'));
+      var stack = ws.getBlockById('stack');
+      assertNull(stack.getParent());
+      assertTrue(stack.rendered);
+    } finally {
+      deleteMismatchBlocks();
+    }
+  });
+}
+
+function test_asyncClearTakesOldScriptsOutOfThePageAtOnce() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    var oldMax = Blockly.Xml.SYNC_CLEAR_MAX_BLOCKS;
+    Blockly.Xml.SYNC_CLEAR_MAX_BLOCKS = 10;
+    try {
+      var old = [];
+      for (var i = 0; i < 20; i++) {
+        var block = ws.newBlock('deferred_test', 'old' + i);
+        block.initSvg();
+        block.render(false);
+        old.push(block.getSvgRoot());
+      }
+      Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {}, ctx);
+      old.forEach(function(svg) {
+        assertNull('Old scripts leave the page before any frame', svg.parentNode);
+      });
+      flush();
+      assertNull(ws.getBlockById('old0'));
+      assertNotNull(ws.getBlockById('near'));
+    } finally {
+      Blockly.Xml.SYNC_CLEAR_MAX_BLOCKS = oldMax;
+    }
+  });
+}
+
+function test_asyncClearSurvivesABlockThatCannotBeDisposed() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    var oldMax = Blockly.Xml.SYNC_CLEAR_MAX_BLOCKS;
+    Blockly.Xml.SYNC_CLEAR_MAX_BLOCKS = 10;
+    try {
+      for (var i = 0; i < 20; i++) ws.newBlock('deferred_test', 'old' + i);
+      var broken = ws.getBlockById('old5');
+      var dispose = broken.dispose;
+      var throws = true;
+      broken.dispose = function() {
+        if (throws) {
+          throws = false;
+          throw Error('broken dispose');
+        }
+        return dispose.apply(this, arguments);
+      };
+      Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {}, ctx);
+      flush();
+      assertEquals('The canvas comes back', '', ws.getCanvas().style.visibility);
+      assertNotNull('and the next sprite loads', ws.getBlockById('near'));
+    } finally {
+      Blockly.Xml.SYNC_CLEAR_MAX_BLOCKS = oldMax;
+    }
+  });
+}
