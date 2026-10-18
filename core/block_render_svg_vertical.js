@@ -631,60 +631,64 @@ Blockly.BlockSvg.prototype.getHeightWidth = function() {
  */
 Blockly.BlockSvg.prototype.render = function(opt_bubble, opt_deferConnections) {
   Blockly.Field.startCache();
-  this.rendered = true;
+  // A block that fails to draw must not leave width caching on for good.
+  try {
+    this.rendered = true;
 
-  var cursorX = Blockly.BlockSvg.SEP_SPACE_X;
-  if (this.RTL) {
-    cursorX = -cursorX;
-  }
-  // Move the icons into position.
-  var icons = this.getIcons();
-  var scratchCommentIcon = null;
-  for (var i = 0; i < icons.length; i++) {
-    if (icons[i] instanceof Blockly.ScratchBlockComment) {
-      // Don't render scratch block comment icon until
-      // after the inputs
-      scratchCommentIcon = icons[i];
-    } else {
-      cursorX = icons[i].renderIcon(cursorX);
+    var cursorX = Blockly.BlockSvg.SEP_SPACE_X;
+    if (this.RTL) {
+      cursorX = -cursorX;
     }
-  }
-  cursorX += this.RTL ?
-      Blockly.BlockSvg.SEP_SPACE_X : -Blockly.BlockSvg.SEP_SPACE_X;
-  // If there are no icons, cursorX will be 0, otherwise it will be the
-  // width that the first label needs to move over by.
-
-  // If this is an extension reporter block, add a horizontal offset.
-  if (this.isScratchExtension && this.outputConnection) {
+    // Move the icons into position.
+    var icons = this.getIcons();
+    var scratchCommentIcon = null;
+    for (var i = 0; i < icons.length; i++) {
+      if (icons[i] instanceof Blockly.ScratchBlockComment) {
+        // Don't render scratch block comment icon until
+        // after the inputs
+        scratchCommentIcon = icons[i];
+      } else {
+        cursorX = icons[i].renderIcon(cursorX);
+      }
+    }
     cursorX += this.RTL ?
-      -Blockly.BlockSvg.GRID_UNIT : Blockly.BlockSvg.GRID_UNIT;
-  }
+        Blockly.BlockSvg.SEP_SPACE_X : -Blockly.BlockSvg.SEP_SPACE_X;
+    // If there are no icons, cursorX will be 0, otherwise it will be the
+    // width that the first label needs to move over by.
 
-  var inputRows = this.renderCompute_(cursorX);
-  this.renderDraw_(cursorX, inputRows);
-  if (!opt_deferConnections) this.renderMoveConnections_();
-
-  this.renderClassify_();
-
-  // Position the Scratch Block Comment Icon at the end of the block
-  if (scratchCommentIcon) {
-    var iconX = this.RTL ? -inputRows.rightEdge : inputRows.rightEdge;
-    var inputMarginY = (inputRows.length ? inputRows[0].height : this.height) / 2;
-    scratchCommentIcon.renderIcon(iconX, inputMarginY);
-  }
-
-  if (opt_bubble !== false) {
-    // Parent rendering also tightens this block's connection and reflows
-    // insertion previews. Do not skip previous statements in the stack.
-    var parentBlock = this.getParent();
-    if (parentBlock) {
-      parentBlock.render(true);
-    } else {
-      // Top-most block.  Fire an event to allow scrollbars to resize.
-      Blockly.resizeSvgContents(this.workspace);
+    // If this is an extension reporter block, add a horizontal offset.
+    if (this.isScratchExtension && this.outputConnection) {
+      cursorX += this.RTL ?
+        -Blockly.BlockSvg.GRID_UNIT : Blockly.BlockSvg.GRID_UNIT;
     }
+
+    var inputRows = this.renderCompute_(cursorX);
+    this.renderDraw_(cursorX, inputRows);
+    if (!opt_deferConnections) this.renderMoveConnections_();
+
+    this.renderClassify_();
+
+    // Position the Scratch Block Comment Icon at the end of the block
+    if (scratchCommentIcon) {
+      var iconX = this.RTL ? -inputRows.rightEdge : inputRows.rightEdge;
+      var inputMarginY = (inputRows.length ? inputRows[0].height : this.height) / 2;
+      scratchCommentIcon.renderIcon(iconX, inputMarginY);
+    }
+
+    if (opt_bubble !== false) {
+      // Parent rendering also tightens this block's connection and reflows
+      // insertion previews. Do not skip previous statements in the stack.
+      var parentBlock = this.getParent();
+      if (parentBlock) {
+        parentBlock.render(true);
+      } else {
+        // Top-most block.  Fire an event to allow scrollbars to resize.
+        Blockly.resizeSvgContents(this.workspace);
+      }
+    }
+  } finally {
+    Blockly.Field.stopCache();
   }
-  Blockly.Field.stopCache();
 
   this.updateIntersectionObserver();
 };

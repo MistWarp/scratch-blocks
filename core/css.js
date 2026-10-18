@@ -385,6 +385,10 @@ Blockly.Css.CONTENT = [
     'stroke-width: 1px;',
   '}',
 
+  '.blocklyCulled {',
+    'display: none !important;',
+  '}',
+
   '.blocklyScriptPlaceholder {',
     'fill: rgba(127, 127, 127, 0.12);',
   '}',

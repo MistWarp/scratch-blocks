@@ -129,3 +129,31 @@ test('unobserving a block drops it from a pending dirty pass', () => {
   assert.equal(block.measured, 1);
   assert.equal(observer.dirty_.length, 0);
 });
+
+test('unculling keeps display changes made while a block was culled', () => {
+  const Blockly = load();
+  const observer = new Blockly.IntersectionObserver(makeWorkspace());
+  const makeElement = () => {
+    const classes = new Set();
+    return {
+      style: {display: ''},
+      hasAttribute: () => false,
+      classList: {add: c => classes.add(c), remove: c => classes.delete(c), has: c => classes.has(c)},
+      nextElementSibling: null
+    };
+  };
+  const label = makeElement();
+  const collapsedText = makeElement();
+  label.nextElementSibling = collapsedText;
+  const block = {getSvgRoot: () => ({firstElementChild: label})};
+
+  observer.setOwnHidden_(block, true);
+  assert.equal(label.classList.has('blocklyCulled'), true);
+  // Collapsing hides the label and shows the collapsed text while culled.
+  label.style.display = 'none';
+  collapsedText.style.display = 'block';
+  observer.setOwnHidden_(block, false);
+  assert.equal(label.classList.has('blocklyCulled'), false);
+  assert.equal(label.style.display, 'none');
+  assert.equal(collapsedText.style.display, 'block');
+});

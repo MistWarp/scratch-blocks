@@ -207,6 +207,21 @@ Blockly.Events.fire = function(event) {
     setTimeout(Blockly.Events.fireNow_, 0);
   }
   Blockly.Events.FIRE_QUEUE_.push(event);
+  if (event.refillShadow_) {
+    // A block moved out of a slot that the loader had left it out of: put the
+    // slot's shadow back into it in the VM too (see Blockly.Events.Move).
+    var shadow = event.refillShadow_;
+    event.refillShadow_ = null;
+    if (shadow.workspace && shadow.getParent()) {
+      var refill = new Blockly.Events.BlockMove(shadow);
+      refill.oldParentId = undefined;
+      refill.oldInputName = undefined;
+      refill.oldCoordinate = undefined;
+      refill.recordNew();
+      refill.recordUndo = false;
+      Blockly.Events.FIRE_QUEUE_.push(refill);
+    }
+  }
 };
 
 /**

@@ -1223,6 +1223,20 @@ Blockly.WorkspaceSvg.prototype.paste = function(xmlBlock) {
  * @param {!Element} xmlBlock XML block element.
  */
 Blockly.WorkspaceSvg.prototype.pasteBlock_ = function(xmlBlock) {
+  if (this.isUnloadedBlockId) {
+    // A copy of a script that is not loaded right now would otherwise keep its
+    // IDs, and the VM would treat the copy as the original.
+    xmlBlock = /** @type {!Element} */ (xmlBlock.cloneNode(true));
+    var elements = [xmlBlock].concat(
+        Array.prototype.slice.call(xmlBlock.getElementsByTagName('*')));
+    for (var e = 0; e < elements.length; e++) {
+      var tag = elements[e].tagName.toLowerCase();
+      if ((tag == 'block' || tag == 'shadow') &&
+          this.isUnloadedBlockId(elements[e].getAttribute('id'))) {
+        elements[e].removeAttribute('id');
+      }
+    }
+  }
   Blockly.Events.disable();
   try {
     var block = Blockly.Xml.domToBlock(xmlBlock, this);

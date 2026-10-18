@@ -804,3 +804,89 @@ function test_asyncClearSurvivesABlockThatCannotBeDisposed() {
     }
   });
 }
+
+function test_looseBlockTellsTheVmWhereItWasWhenMovedOrDeleted() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    ctx.blocks.near.inputs = {VALUE: {name: 'VALUE', block: 'stack', shadow: 'slot'}};
+    ctx.blocks.near.next = 'stack2';
+    ctx.blocks.slot = {id: 'slot', opcode: 'deferred_number', topLevel: false, shadow: true,
+      inputs: {}, fields: {}};
+    ctx.blocks.stack = {id: 'stack', opcode: 'deferred_test', topLevel: false, inputs: {}, fields: {}};
+    // A stack block whose next connection is missing (an extension changed it).
+    ctx.blocks.stack2 = {id: 'stack2', opcode: 'deferred_number', topLevel: false, inputs: {}, fields: {}};
+    Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {}, ctx);
+    flush();
+    var stack = ws.getBlockById('stack');
+    var stack2 = ws.getBlockById('stack2');
+    assertNull(stack.getParent());
+    assertNull(stack2.getParent());
+
+    var fired = [];
+    var oldQueue = Blockly.Events.FIRE_QUEUE_.slice();
+    Blockly.Events.enable();
+    try {
+      stack.dispose(false);
+      fired = Blockly.Events.FIRE_QUEUE_.slice(oldQueue.length);
+    } finally {
+      Blockly.Events.FIRE_QUEUE_.length = 0;
+      Blockly.Events.disable();
+    }
+    assertEquals(3, fired.length);
+    assertEquals('Detach it from where the VM has it', Blockly.Events.MOVE, fired[0].type);
+    assertEquals('near', fired[0].oldParentId);
+    assertEquals('VALUE', fired[0].oldInputName);
+    assertEquals('then put the shadow back in the slot', 'slot', fired[1].blockId);
+    assertUndefined(fired[1].oldParentId);
+    assertEquals('near', fired[1].newParentId);
+    assertEquals('VALUE', fired[1].newInputName);
+    assertFalse(fired[1].recordUndo);
+    assertEquals('before deleting it', Blockly.Events.DELETE, fired[2].type);
+
+    var move = new Blockly.Events.BlockMove(stack2);
+    assertEquals('A block off a next connection detaches from it', 'near', move.oldParentId);
+    assertUndefined(move.oldInputName);
+    assertUndefined('later moves start from where it is', new Blockly.Events.BlockMove(stack2).oldParentId);
+  });
+}
+
+function test_deferredBlockThatFailsToDrawDoesNotHideTheRest() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    ctx.blocks.near.next = 'mid';
+    ctx.blocks.mid = {id: 'mid', opcode: 'deferred_test', topLevel: false, inputs: {}, fields: {}, next: 'tail'};
+    ctx.blocks.tail = {id: 'tail', opcode: 'deferred_test', topLevel: false, inputs: {}, fields: {}};
+    var oldDraw = Blockly.BlockSvg.prototype.renderDraw_;
+    var cacheBefore = Blockly.Field.cacheReference_;
+    Blockly.BlockSvg.prototype.renderDraw_ = function() {
+      if (this.id == 'mid') throw Error('cannot draw');
+      return oldDraw.apply(this, arguments);
+    };
+    try {
+      Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {}, ctx);
+      flush();
+    } finally {
+      Blockly.BlockSvg.prototype.renderDraw_ = oldDraw;
+    }
+    var canvas = ws.getCanvas();
+    for (var node = ws.getBlockById('tail').getSvgRoot(); node !== canvas; node = node.parentNode) {
+      assertNotNull('tail is in the canvas', node);
+      assertNotEquals('nothing above tail is hidden', 'hidden', node.style.visibility);
+    }
+    assertEquals('A failed render does not leave width caching on', cacheBefore,
+        Blockly.Field.cacheReference_);
+  });
+}
+
+function test_pastingACopyOfAnUnloadedScriptGetsNewIds() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {}, ctx);
+    flush();
+    assertNull('far is not loaded', ws.getBlockById('far'));
+    ws.paste(Blockly.Xml.textToDom(
+        '<xml><block type="deferred_test" id="far" x="10" y="200"></block></xml>').firstChild);
+    ws.paste(Blockly.Xml.textToDom(
+        '<xml><block type="deferred_test" id="fresh" x="10" y="400"></block></xml>').firstChild);
+    assertNull('The copy must not take the unloaded block\'s ID', ws.getBlockById('far'));
+    assertNotNull('Free IDs are kept as before', ws.getBlockById('fresh'));
+    assertEquals(3, ws.getTopBlocks().length);
+  });
+}

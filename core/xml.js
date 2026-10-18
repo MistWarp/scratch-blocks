@@ -1410,9 +1410,11 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
             block.renderDeferredConnections_(block.deferredRenderXY_ || block.getRelativeToSurfaceXY());
             delete block.deferredRenderXY_;
           } else {
-            block.render(false, deferredConnections);
             // Top level blocks stay hidden until their script is revealed.
+            // Show the rest first: a block that fails to draw must not hide
+            // the blocks nested in it and after it, which sit in its group.
             if (block.getParent() && block.getSvgRoot()) block.getSvgRoot().style.visibility = '';
+            block.render(false, deferredConnections);
           }
         }
       }
@@ -1823,6 +1825,23 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     materializeScripts(ids);
   };
   workspace.wakeVirtualScripts_ = wake;
+  /**
+   * Whether a block ID belongs to a script the VM has but the workspace has
+   * not loaded. Blocks created with such an ID would take over the VM's block.
+   * @param {string} id Block ID.
+   * @return {boolean} True if the ID is taken by an unloaded block.
+   */
+  workspace.isUnloadedBlockId = function(id) {
+    if (!id || workspace.blockDB_[id]) {
+      return false;
+    }
+    for (var i = 0; i < scripts.length; i++) {
+      if (scripts[i].ctx) {
+        return !!scripts[i].ctx.blocks[id];
+      }
+    }
+    return false;
+  };
 
   // Far-off scripts only need bounds, not thousands of invisible SVG nodes.
   var initialViewport = getViewport();
@@ -1853,6 +1872,7 @@ Blockly.Xml.startDeferredRender_ = function(workspace, scripts, callbacks) {
     workspace.materializeAllScripts = null;
     workspace.materializeScriptsForBlockIds = null;
     workspace.wakeVirtualScripts_ = null;
+    workspace.isUnloadedBlockId = null;
     for (var i = 0; i < scripts.length; i++) {
       removePlaceholder(scripts[i]);
     }
@@ -2495,7 +2515,7 @@ Blockly.Xml.createDescBlockBuilder_ = function(desc, ctx, workspace, hide) {
     if (!result.error) result.error = e;
     console.warn('Could not load a block.', e);
   };
-  var attach = function(block, connect) {
+  var attach = function(block, connect, parent) {
     var connected = false;
     try {
       connected = connect(block);
@@ -2503,10 +2523,13 @@ Blockly.Xml.createDescBlockBuilder_ = function(desc, ctx, workspace, hide) {
       fail(e);
     }
     if (!connected && block.workspace && !block.getParent()) {
+      // The VM still has the block on its parent. Moving or deleting it must
+      // tell the VM it left there (see Blockly.Events.Move).
+      block.loadedParent_ = parent;
       result.loose.push(block);
     }
   };
-  var create = function(d, connect) {
+  var create = function(d, connect, parent) {
     return function() {
       if (!d.opcode) throw Error('Block type unspecified: ' + d.id);
       if (seen[d.id]) {
@@ -2548,17 +2571,17 @@ Blockly.Xml.createDescBlockBuilder_ = function(desc, ctx, workspace, hide) {
       }
       // During deferred rendering attach each new node while it is small.
       // Reattaching a completed nested SVG subtree repeatedly is quadratic.
-      if (hide && connect) attach(block, connect);
+      if (hide && connect) attach(block, connect, parent);
       tasks.push(function() {
         if (d.shadow) block.setShadow(true);
         if (d.collapsed) block.setCollapsed(true);
-        if (!hide && connect) attach(block, connect);
+        if (!hide && connect) attach(block, connect, parent);
       });
       if (d.next && ctx.blocks[d.next]) {
         tasks.push(create(ctx.blocks[d.next], function(next) {
           return Blockly.Xml.connectLoadedBlock_(block.nextConnection,
               next.previousConnection);
-        }));
+        }, {parentId: block.id, inputName: null}));
       }
       tasks.push(function() {
         for (var name in d.fields) {
@@ -2579,6 +2602,7 @@ Blockly.Xml.createDescBlockBuilder_ = function(desc, ctx, workspace, hide) {
         if (inputDesc.shadow && ctx.blocks[inputDesc.shadow]) {
           input.connection.setShadowDesc(ctx.blocks[inputDesc.shadow], ctx);
         }
+        var inputParent = {parentId: block.id, inputName: input.name};
         var connectToInput = function(child) {
           return Blockly.Xml.connectLoadedBlock_(input.connection,
               child.outputConnection || child.previousConnection);
@@ -2588,9 +2612,9 @@ Blockly.Xml.createDescBlockBuilder_ = function(desc, ctx, workspace, hide) {
           // The slot shows its shadow, as it would if the block were dragged out.
           var shadowDesc = inputDesc.shadow && inputDesc.shadow !== childId &&
               ctx.blocks[inputDesc.shadow];
-          if (shadowDesc) tasks.push(create(shadowDesc, connectToInput));
+          if (shadowDesc) tasks.push(create(shadowDesc, connectToInput, inputParent));
           return false;
-        }));
+        }, inputParent));
       });
     };
   };

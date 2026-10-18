@@ -268,6 +268,12 @@ Blockly.Block.prototype.dispose = function(healStack) {
     this.workspace.removeChangeListener(this.onchangeWrapper_);
   }
   this.unplug(healStack);
+  if (this.loadedParent_ && Blockly.Events.isEnabled()) {
+    // Detach it from where the VM has it before deleting it there.
+    var move = new Blockly.Events.BlockMove(this);
+    move.recordNew();
+    Blockly.Events.fire(move);
+  }
   if (Blockly.Events.isEnabled()) {
     Blockly.Events.fire(new Blockly.Events.BlockDelete(this));
   }
