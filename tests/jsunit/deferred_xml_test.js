@@ -649,8 +649,10 @@ function test_deferredTypeMismatchStaysInItsSlot() {
 function test_deferredBlockThatCannotConnectIsLeftBesideItsScript() {
   deferredXmlTest(function(ws, ctx, view, flush) {
     // A stack block in a reporter slot cannot connect at all.
-    ctx.blocks.near.inputs = {VALUE: {name: 'VALUE', block: 'stack', shadow: null}};
+    ctx.blocks.near.inputs = {VALUE: {name: 'VALUE', block: 'stack', shadow: 'slot'}};
     ctx.blocks.near.next = 'tail';
+    ctx.blocks.slot = {id: 'slot', opcode: 'deferred_number', topLevel: false, shadow: true,
+      inputs: {}, fields: {}};
     ctx.blocks.stack = {id: 'stack', opcode: 'deferred_test', topLevel: false,
       inputs: {VALUE: {name: 'VALUE', block: 'num', shadow: null}}, fields: {}};
     ctx.blocks.num = {id: 'num', opcode: 'deferred_number', topLevel: false, inputs: {}, fields: {}};
@@ -663,6 +665,9 @@ function test_deferredBlockThatCannotConnectIsLeftBesideItsScript() {
     var near = ws.getBlockById('near');
     assertNotNull('The rest of the script loads', near);
     assertEquals(near, ws.getBlockById('tail').getParent());
+    var slot = ws.getBlockById('slot');
+    assertEquals('The empty slot gets its shadow back', near, slot.getParent());
+    assertTrue(slot.isShadow());
     var stack = ws.getBlockById('stack');
     assertNotNull('The block that does not fit is kept', stack);
     assertNull(stack.getParent());

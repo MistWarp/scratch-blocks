@@ -2579,9 +2579,17 @@ Blockly.Xml.createDescBlockBuilder_ = function(desc, ctx, workspace, hide) {
         if (inputDesc.shadow && ctx.blocks[inputDesc.shadow]) {
           input.connection.setShadowDesc(ctx.blocks[inputDesc.shadow], ctx);
         }
-        tasks.push(create(childDesc, function(child) {
+        var connectToInput = function(child) {
           return Blockly.Xml.connectLoadedBlock_(input.connection,
               child.outputConnection || child.previousConnection);
+        };
+        tasks.push(create(childDesc, function(child) {
+          if (connectToInput(child)) return true;
+          // The slot shows its shadow, as it would if the block were dragged out.
+          var shadowDesc = inputDesc.shadow && inputDesc.shadow !== childId &&
+              ctx.blocks[inputDesc.shadow];
+          if (shadowDesc) tasks.push(create(shadowDesc, connectToInput));
+          return false;
         }));
       });
     };
