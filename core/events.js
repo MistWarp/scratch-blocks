@@ -219,7 +219,8 @@ Blockly.Events.fire = function(event) {
       refill.oldCoordinate = undefined;
       refill.recordNew();
       refill.recordUndo = false;
-      Blockly.Events.FIRE_QUEUE_.push(refill);
+      // Through fire, so anything wrapping it sees this event too.
+      Blockly.Events.fire(refill);
     }
   }
 };

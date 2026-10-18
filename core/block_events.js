@@ -381,7 +381,9 @@ Blockly.Events.Move = function(block) {
   }
   Blockly.Events.Move.superClass_.constructor.call(this, block);
   var location = this.currentLocation_();
-  if (block.loadedParent_) {
+  // Only a move that will be sent says where the block left; one built while
+  // events are off (the loader placing it) must leave that for the real move.
+  if (block.loadedParent_ && Blockly.Events.isEnabled()) {
     // A block the loader could not connect where the VM has it. The VM must
     // detach it from there, or it ends up both in its old slot and on its own.
     location = {parentId: block.loadedParent_.parentId,

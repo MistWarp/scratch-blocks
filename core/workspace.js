@@ -352,17 +352,32 @@ Blockly.Workspace.prototype.clear = function() {
   if (!existingGroup) {
     Blockly.Events.setGroup(true);
   }
-  while (this.topBlocks_.length) {
-    this.topBlocks_[0].dispose();
-  }
-  while (this.topComments_.length) {
-    this.topComments_[this.topComments_.length - 1].dispose();
-  }
-  while (this.topFrames_.length) {
-    this.topFrames_[this.topFrames_.length - 1].dispose();
-  }
-  if (!existingGroup) {
-    Blockly.Events.setGroup(false);
+  try {
+    while (this.topBlocks_.length) {
+      var block = this.topBlocks_[0];
+      try {
+        block.dispose();
+      } catch (e) {
+        // One block that cannot be disposed must not stop the clear, or every
+        // block after it stays on the workspace.
+        console.warn('Could not dispose a block while clearing.', e);
+        if (this.topBlocks_[0] === block) {
+          this.topBlocks_.shift();
+          delete this.blockDB_[block.id];
+        }
+      }
+    }
+    while (this.topComments_.length) {
+      this.topComments_[this.topComments_.length - 1].dispose();
+    }
+    while (this.topFrames_.length) {
+      this.topFrames_[this.topFrames_.length - 1].dispose();
+    }
+  } finally {
+    if (!existingGroup) {
+      Blockly.Events.setGroup(false);
+    }
+    this.isClearing = false;
   }
   this.variableMap_.clear();
   // Any block with a drop-down or WidgetDiv was disposed.

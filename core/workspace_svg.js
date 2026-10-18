@@ -2536,20 +2536,23 @@ Blockly.WorkspaceSvg.prototype.clear = function() {
   if (canvas) {
     goog.dom.removeChildren(canvas);
   }
-  Blockly.WorkspaceSvg.superClass_.clear.call(this);
-  if (dbList) {
-    for (var i = 0; i < dbList.length; i++) {
-      if (dbList[i]) {
-        dbList[i].connections_.length = 0;
-        dbList[i].bulkClear_ = false;
+  try {
+    Blockly.WorkspaceSvg.superClass_.clear.call(this);
+  } finally {
+    if (dbList) {
+      for (var i = 0; i < dbList.length; i++) {
+        if (dbList[i]) {
+          dbList[i].connections_.length = 0;
+          dbList[i].bulkClear_ = false;
+        }
       }
     }
+    if (canvas) {
+      // Anything a dispose re-added while clearing.
+      goog.dom.removeChildren(canvas);
+    }
+    this.setResizesEnabled(true);
   }
-  if (canvas) {
-    // Anything a dispose re-added while clearing.
-    goog.dom.removeChildren(canvas);
-  }
-  this.setResizesEnabled(true);
 };
 
 /**

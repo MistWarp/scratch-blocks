@@ -684,13 +684,22 @@ Blockly.Xml.clearWorkspaceInFrames_ = function(workspace, load, callbacks) {
   var handle = {cancel: function() {
     if (cancelled) return;
     cancelled = true;
-    // Finish the disposal now: the blocks are already out of the document, so
-    // leaving them would leave invisible blocks behind.
     if (!loader) {
-      try {
-        disposeUntil(Infinity);
-      } catch (e) {
-        console.warn('Could not finish clearing the workspace.', e);
+      // Finish the script being disposed and put the untouched ones back, so
+      // nothing is left out of the document. Whatever replaces this load
+      // clears them again; disposing them all here would stall the click
+      // that cancelled it.
+      while (disposer) {
+        try {
+          if (disposer.step()) disposer = null;
+        } catch (e) {
+          console.warn('Could not dispose a block while clearing.', e);
+          disposer = null;
+        }
+      }
+      for (var r = 0; r < roots.length; r++) {
+        var rootSvg = roots[r].workspace && roots[r].getSvgRoot();
+        if (rootSvg && !rootSvg.parentNode) canvas.appendChild(rootSvg);
       }
     }
     canvas.style.visibility = visibility;
@@ -2487,8 +2496,17 @@ Blockly.Xml.connectLoadedBlock_ = function(parentConnection, childConnection) {
   }
   if (reason == Blockly.Connection.REASON_CHECKS_FAILED &&
       parentConnection.isSuperior()) {
-    parentConnection.connect_(childConnection);
-    return true;
+    // Only the type check may be skipped. Check the rules after it the same
+    // way canConnectWithReason_ would have.
+    var parentBlock = parentConnection.getSourceBlock();
+    var childBlock = childConnection.getSourceBlock();
+    var procedure = parentBlock.type == Blockly.PROCEDURES_DEFINITION_BLOCK_TYPE ||
+        parentBlock.type == Blockly.PROCEDURES_PROTOTYPE_BLOCK_TYPE ||
+        childBlock.type == Blockly.PROCEDURES_PROTOTYPE_BLOCK_TYPE;
+    if (!procedure && !(parentBlock.isShadow() && !childBlock.isShadow())) {
+      parentConnection.connect_(childConnection);
+      return true;
+    }
   }
   return false;
 };
@@ -2510,24 +2528,33 @@ Blockly.Xml.createDescBlockBuilder_ = function(desc, ctx, workspace, hide) {
   var tasks = [];
   var seen = Object.create(null);
   var result = {root: null, blocks: [], loose: [], failures: 0, error: null};
+  var strays = [];
   var fail = function(e) {
     result.failures++;
     if (!result.error) result.error = e;
     console.warn('Could not load a block.', e);
   };
-  var attach = function(block, connect, parent) {
+  var attach = function(block, connect, parent, shadow) {
     var connected = false;
     try {
       connected = connect(block);
     } catch (e) {
       fail(e);
     }
-    if (!connected && block.workspace && !block.getParent()) {
-      // The VM still has the block on its parent. Moving or deleting it must
-      // tell the VM it left there (see Blockly.Events.Move).
-      block.loadedParent_ = parent;
-      result.loose.push(block);
+    if (connected || !block.workspace || block.getParent()) {
+      return;
     }
+    if (shadow) {
+      // A shadow on its own is nothing to show or edit. Its own tasks are
+      // still queued, so dispose of it once the script is built.
+      strays.push(block);
+      fail(Error('Shadow block does not fit its input: ' + block.type));
+      return;
+    }
+    // The VM still has the block on its parent. Moving or deleting it must
+    // tell the VM it left there (see Blockly.Events.Move).
+    block.loadedParent_ = parent;
+    result.loose.push(block);
   };
   var create = function(d, connect, parent) {
     return function() {
@@ -2571,11 +2598,11 @@ Blockly.Xml.createDescBlockBuilder_ = function(desc, ctx, workspace, hide) {
       }
       // During deferred rendering attach each new node while it is small.
       // Reattaching a completed nested SVG subtree repeatedly is quadratic.
-      if (hide && connect) attach(block, connect, parent);
+      if (hide && connect) attach(block, connect, parent, d.shadow);
       tasks.push(function() {
         if (d.shadow) block.setShadow(true);
         if (d.collapsed) block.setCollapsed(true);
-        if (!hide && connect) attach(block, connect, parent);
+        if (!hide && connect) attach(block, connect, parent, d.shadow);
       });
       if (d.next && ctx.blocks[d.next]) {
         tasks.push(create(ctx.blocks[d.next], function(next) {
@@ -2628,7 +2655,15 @@ Blockly.Xml.createDescBlockBuilder_ = function(desc, ctx, workspace, hide) {
         fail(e);
       }
     }
-    return tasks.length === 0;
+    if (tasks.length) {
+      return false;
+    }
+    while (strays.length) {
+      var stray = strays.pop();
+      result.blocks.splice(result.blocks.indexOf(stray), 1);
+      if (stray.workspace && !stray.getParent()) stray.dispose(false);
+    }
+    return true;
   };
   return result;
 };
@@ -2660,6 +2695,22 @@ Blockly.Xml.descToBlockHeadless_ = function(desc, ctx, workspace) {
  */
 Blockly.Xml.placeLooseBlocks_ = function(topBlock, loose) {
   if (!loose.length) return;
+  // Placing them is not an edit. A move event here would detach them in the
+  // VM, changing the project just by looking at it.
+  Blockly.Events.disable();
+  try {
+    Blockly.Xml.placeLooseBlocksNow_(topBlock, loose);
+  } finally {
+    Blockly.Events.enable();
+  }
+};
+
+/**
+ * @param {!Blockly.BlockSvg} topBlock The script's top block, rendered.
+ * @param {!Array.<!Blockly.BlockSvg>} loose Loose blocks, rendered.
+ * @private
+ */
+Blockly.Xml.placeLooseBlocksNow_ = function(topBlock, loose) {
   var xy = topBlock.getRelativeToSurfaceXY();
   var gap = Blockly.SNAP_RADIUS;
   var x = xy.x + (topBlock.RTL ? -1 : 1) * (topBlock.getHeightWidth().width + gap);
@@ -2857,9 +2908,9 @@ Blockly.Xml.clearWorkspaceAndLoadFromDescs = function(xml, descs, workspace) {
     if (result.failures) {
       // Everything that could load has loaded. Report the rest so the editor
       // can say part of the sprite could not be shown.
-      var error = Error('Some blocks could not be loaded (' + result.failures + '): ' +
-          (result.error && result.error.message || result.error));
-      throw error;
+      var reason = result.error ? ': ' + (result.error.message || result.error) : '';
+      throw Error(result.failures + ' blocks could not be loaded where the project has them' +
+          reason);
     }
   } finally {
     Blockly.Events.enable();

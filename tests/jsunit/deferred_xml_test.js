@@ -681,22 +681,33 @@ function test_deferredBlockThatCannotConnectIsLeftBesideItsScript() {
   });
 }
 
-function test_deferredUnknownBlockKeepsTheRestOfItsScript() {
+function test_deferredBlockWithoutConnectionsKeepsTheRestOfItsScript() {
   deferredXmlTest(function(ws, ctx, view, flush) {
-    // Blocks from an extension that did not load.
-    ctx.blocks.near.next = 'gone';
-    ctx.blocks.gone = {id: 'gone', opcode: 'unknown_test_block', topLevel: false,
-      inputs: {}, fields: {}, next: 'tail'};
-    ctx.blocks.tail = {id: 'tail', opcode: 'deferred_test', topLevel: false, inputs: {}, fields: {}};
-    var status = null;
-    Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {
-      onProgress: function(value) { status = value; }
-    }, ctx);
-    flush();
-    assertNotNull(ws.getBlockById('near'));
-    assertNotEquals('hidden', ws.getBlockById('near').getSvgRoot().style.visibility);
-    assertEquals('error', status.phase);
-    assertTrue(status.failures >= 1);
+    // What a block from an extension that did not load turns into.
+    Blockly.Blocks.deferred_bare = {init: function() { this.setColour('#123456'); }};
+    try {
+      ctx.blocks.near.next = 'bare';
+      ctx.blocks.bare = {id: 'bare', opcode: 'deferred_bare', topLevel: false,
+        inputs: {}, fields: {}, next: 'tail'};
+      ctx.blocks.tail = {id: 'tail', opcode: 'deferred_test', topLevel: false, inputs: {}, fields: {}};
+      var status = null;
+      Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {
+        onProgress: function(value) { status = value; }
+      }, ctx);
+      flush();
+      assertNotEquals('hidden', ws.getBlockById('near').getSvgRoot().style.visibility);
+      assertNull(ws.getBlockById('near').getNextBlock());
+      ['bare', 'tail'].forEach(function(id) {
+        var block = ws.getBlockById(id);
+        assertNotNull(id + ' is kept', block);
+        assertNull(id + ' is left beside the script', block.getParent());
+        assertEquals(ws.getCanvas(), block.getSvgRoot().parentNode);
+      });
+      assertEquals('error', status.phase);
+      assertEquals(2, status.failures);
+    } finally {
+      delete Blockly.Blocks.deferred_bare;
+    }
   });
 }
 
@@ -842,10 +853,18 @@ function test_looseBlockTellsTheVmWhereItWasWhenMovedOrDeleted() {
     assertFalse(fired[1].recordUndo);
     assertEquals('before deleting it', Blockly.Events.DELETE, fired[2].type);
 
-    var move = new Blockly.Events.BlockMove(stack2);
-    assertEquals('A block off a next connection detaches from it', 'near', move.oldParentId);
-    assertUndefined(move.oldInputName);
-    assertUndefined('later moves start from where it is', new Blockly.Events.BlockMove(stack2).oldParentId);
+    assertUndefined('A move built while events are off is not sent and keeps nothing',
+        new Blockly.Events.BlockMove(stack2).oldParentId);
+    Blockly.Events.enable();
+    try {
+      var move = new Blockly.Events.BlockMove(stack2);
+      assertEquals('A block off a next connection detaches from it', 'near', move.oldParentId);
+      assertUndefined(move.oldInputName);
+      assertUndefined('later moves start from where it is',
+          new Blockly.Events.BlockMove(stack2).oldParentId);
+    } finally {
+      Blockly.Events.disable();
+    }
   });
 }
 
@@ -888,5 +907,121 @@ function test_pastingACopyOfAnUnloadedScriptGetsNewIds() {
     assertNull('The copy must not take the unloaded block\'s ID', ws.getBlockById('far'));
     assertNotNull('Free IDs are kept as before', ws.getBlockById('fresh'));
     assertEquals(3, ws.getTopBlocks().length);
+  });
+}
+
+// The stack block that cannot go in near's VALUE slot, with the slot's shadow.
+function addLooseStack(ctx) {
+  ctx.blocks.near.inputs = {VALUE: {name: 'VALUE', block: 'stack', shadow: 'slot'}};
+  ctx.blocks.slot = {id: 'slot', opcode: 'deferred_number', topLevel: false, shadow: true,
+    inputs: {}, fields: {}};
+  ctx.blocks.stack = {id: 'stack', opcode: 'deferred_test', topLevel: false, inputs: {}, fields: {}};
+}
+
+// Run fn with events on and return the events it queued for ws.
+function eventsFrom(ws, fn) {
+  var start = Blockly.Events.FIRE_QUEUE_.length;
+  Blockly.Events.enable();
+  try {
+    fn();
+    return Blockly.Events.FIRE_QUEUE_.slice(start).filter(function(event) {
+      return event.workspaceId == ws.id;
+    });
+  } finally {
+    Blockly.Events.FIRE_QUEUE_.length = start;
+    Blockly.Events.disable();
+  }
+}
+
+function test_loadingLooseBlocksDoesNotChangeTheVm() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    addLooseStack(ctx);
+    var events = eventsFrom(ws, function() {
+      Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {}, ctx);
+      flush();
+    });
+    assertNull(ws.getBlockById('stack').getParent());
+    events.forEach(function(event) {
+      assertNotEquals('Loading sends no moves: ' + event.blockId + ' ' + event.oldParentId +
+          ' ' + event.newParentId, Blockly.Events.MOVE, event.type);
+    });
+    assertEquals('The VM parent is still remembered', 'near',
+        ws.getBlockById('stack').loadedParent_.parentId);
+  });
+}
+
+function test_deletingAScriptDetachesBlocksLeftBesideIt() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    addLooseStack(ctx);
+    Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {}, ctx);
+    flush();
+    var near = ws.getBlockById('near');
+    var events = eventsFrom(ws, function() {
+      near.dispose(false);
+    });
+    assertEquals(Blockly.Events.MOVE, events[0].type);
+    assertEquals('stack', events[0].blockId);
+    assertEquals('near', events[0].oldParentId);
+    assertEquals(Blockly.Events.DELETE, events[events.length - 1].type);
+    assertEquals('near', events[events.length - 1].blockId);
+    assertNotNull('The loose block stays', ws.getBlockById('stack'));
+    assertNull(ws.getBlockById('stack').loadedParent_);
+  });
+}
+
+function test_fillingTheSlotDetachesTheBlockLeftOutOfIt() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    addLooseStack(ctx);
+    Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(Blockly.Xml.textToDom('<xml/>'), ws, {}, ctx);
+    flush();
+    var near = ws.getBlockById('near');
+    var number = ws.newBlock('deferred_number', 'number');
+    var events = eventsFrom(ws, function() {
+      near.getInput('VALUE').connection.connect(number.outputConnection);
+    });
+    var moved = events.filter(function(event) { return event.type == Blockly.Events.MOVE; })
+        .map(function(event) { return event.blockId; });
+    assertEquals('The loose block leaves the slot first', 'stack', moved[0]);
+    assertEquals('then the shadow is put back', 'slot', moved[1]);
+    assertTrue('before the new block goes in', moved.indexOf('number') > 1);
+  });
+}
+
+function test_cancellingAnAsyncClearPutsUntouchedScriptsBack() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    var oldMax = Blockly.Xml.SYNC_CLEAR_MAX_BLOCKS;
+    Blockly.Xml.SYNC_CLEAR_MAX_BLOCKS = 10;
+    try {
+      for (var i = 0; i < 20; i++) {
+        var block = ws.newBlock('deferred_test', 'old' + i);
+        block.initSvg();
+        block.render(false);
+      }
+      var handle = Blockly.Xml.clearWorkspaceAndLoadFromXmlDeferred(
+          Blockly.Xml.textToDom('<xml/>'), ws, {}, ctx);
+      handle.cancel();
+      for (var j = 0; j < 20; j++) {
+        assertEquals('old' + j + ' is back in the page', ws.getCanvas(),
+            ws.getBlockById('old' + j).getSvgRoot().parentNode);
+      }
+      assertEquals('', ws.getCanvas().style.visibility);
+      flush();
+    } finally {
+      Blockly.Xml.SYNC_CLEAR_MAX_BLOCKS = oldMax;
+    }
+  });
+}
+
+function test_clearFinishesWhenABlockCannotBeDisposed() {
+  deferredXmlTest(function(ws, ctx, view, flush) {
+    for (var i = 0; i < 5; i++) ws.newBlock('deferred_test', 'old' + i);
+    ws.getBlockById('old2').dispose = function() { throw Error('broken dispose'); };
+    ws.clear();
+    assertEquals(0, ws.getTopBlocks().length);
+    assertFalse(ws.isClearing);
+    assertEquals('', Blockly.Events.getGroup());
+    ws.connectionDBList.forEach(function(db) {
+      if (db) assertFalse(!!db.bulkClear_);
+    });
   });
 }
