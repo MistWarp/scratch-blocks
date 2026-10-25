@@ -283,12 +283,9 @@ Blockly.ScratchBlocks.ProcedureUtils.createAllInputs_ = function(connectionMap) 
   var hasAnyField = false;
   for (var i = 0, component; component = procComponents[i]; i++) {
     var labelText;
-    if (component.substring(0, 1) == '%') {
-      var argumentType = component.substring(1, 2);
-      if (!(argumentType == 'n' || argumentType == 'b' || argumentType == 's')) {
-        throw new Error(
-            'Found an custom procedure with an invalid type: ' + argumentType);
-      }
+    var argumentType = component.substring(0, 1) == '%' ?
+        component.substring(1, 2) : '';
+    if (argumentType == 'n' || argumentType == 'b' || argumentType == 's') {
       labelText = component.substring(2).trim();
 
       var id = this.argumentIds_[argumentCount];
