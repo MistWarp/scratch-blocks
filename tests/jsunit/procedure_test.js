@@ -71,6 +71,33 @@ function procedureTest_tearDown() {
   workspace.dispose();
 }
 
+var procedureTest_callBlock = Blockly.Blocks.procedures_call;
+
+function test_procCode_leadingPercentIsLabel() {
+  var previous = Blockly.Blocks.procedures_call;
+  Blockly.Blocks.procedures_call = procedureTest_callBlock;
+  var headless = new Blockly.Workspace();
+  try {
+    var xml = '<xml><block type="procedures_call"><mutation proccode="%2 chance %s" ' +
+      'argumentids=\'["a"]\' warp="false"></mutation></block></xml>';
+    var call = Blockly.Xml.domToBlock(Blockly.Xml.textToDom(xml).firstChild, headless);
+    var labels = [];
+    var inputs = [];
+    call.inputList.forEach(function(input) {
+      if (input.type == Blockly.DUMMY_INPUT) {
+        labels.push(input.fieldRow[0].getText());
+      } else {
+        inputs.push(input.name);
+      }
+    });
+    assertEquals('%2 chance', labels[0]);
+    assertArrayEquals(['a'], inputs);
+  } finally {
+    headless.dispose();
+    Blockly.Blocks.procedures_call = previous;
+  }
+}
+
 function test_editProcedure_missingDefinition() {
   procedureTest_setUp();
   var originalCallback = Blockly.Procedures.externalProcedureDefCallback;
