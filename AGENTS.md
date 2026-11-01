@@ -10,7 +10,7 @@ scratch-blocks is the block workspace in MistWarp's editor: a Blockly fork, by w
 
 ## Things that look safe to change but are not
 
-- **Closure compiles `core/`.** A new symbol must be exported in the `goog.global` block, or Closure strips it. The JSDoc type annotations (`@param {Type}`, `@private`, `@export`) are compiler input, not comments. Keep them accurate, but don't add explanatory prose.
+- **Closure builds `core/` from its dependency graph.** The build starts at `core/blockly.js` and includes only files reachable through `goog.require`, so a new file needs a `goog.provide` and must be required by something that is already included. The JSDoc type annotations (`@param {Type}`, `@private`) are compiler input, not comments. Keep them accurate, but don't add explanatory prose.
 - **Building needs Java.** Put a JRE 17 on `PATH`, then run `npm run build:closure` (about 25 seconds) and commit the regenerated compressed files.
 - **Lazy loading and loose blocks are subtle.** Large projects load scripts on demand, so check changes to events, the flyout or `xml.js` with a big project in the real editor.
 
