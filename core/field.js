@@ -626,9 +626,10 @@ Blockly.Field.initMeasurementElement_ = function() {
   
   // Create a single shared measurement element
   var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.style.position = 'absolute';
+  svg.style.position = 'fixed';
   svg.style.visibility = 'hidden';
-  svg.style.left = '-9999px';
+  svg.style.top = '-9999px';
+  svg.style.left = '0';
   svg.style.pointerEvents = 'none';
   
   var text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
